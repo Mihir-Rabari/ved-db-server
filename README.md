@@ -42,7 +42,7 @@ VedDB is a blazing‑fast, shared‑memory key‑value database built in Rust. I
 - **Millions of operations/sec** with CPU core pinning and sharding
 - **Topic-based Pub/Sub** with MPMC delivery
 - **Remote connectivity** via gRPC streaming and QUIC
-- **Language bindings** for Go, Python, Node.js via stable C ABI
+- **Language bindings** for Go, Python, Node.js via stable C ABI ( planned )
 - **Optional persistence** with WAL and snapshots
 
 Additional goals:
