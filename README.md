@@ -5,18 +5,29 @@
 ![rust-badge](https://img.shields.io/badge/rust-stable-orange)
 ![platforms-badge](https://img.shields.io/badge/platforms-windows%20%7C%20linux%20%7C%20macOS-informational)
 
-VedDB is a single-node, high-throughput, zero-protocol shared-memory in-memory KV store with Pub/Sub capabilities and remote connectivity via gRPC/QUIC. It is designed for ultra-low latency local access and scalable throughput via sharding.
+VedDB is a single-node, high-throughput, zero-protocol shared-memory in-memory KV store with Pub/Sub capabilities and remote connectivity. It is designed for ultra‑low latency local access and scalable throughput via sharding.
+
+## What is VedDB?
+
+VedDB is a blazing‑fast, shared‑memory key‑value database built in Rust. It keeps your hottest data in a single machine’s memory and lets local processes talk to it with minimal overhead. Think: microservices on the same box exchanging data in microseconds with a tiny CPU footprint.
+
+- __Local fast path__: processes on the same host interact via shared memory rings and arenas.
+- __Network path__: an experimental TCP server today; gRPC/QUIC hardening on the roadmap.
+- __Primitives__: sharded KV with CAS, session management, and a topic‑based Pub/Sub core.
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
+- [What is VedDB?](#what-is-veddb)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Install and Build](#install-and-build)
 - [Configuration](#configuration)
+- [Using VedDB](#using-veddb)
 - [Running as a Windows Service](#running-as-a-windows-service)
+- [Releases](#releases)
 - [Project Structure](#project-structure)
 - [Development](#development)
 - [Roadmap](#roadmap)
@@ -84,6 +95,49 @@ cargo bench
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for internal design details.
 
+## Using VedDB
+
+There are two ways to use VedDB today:
+
+1) __Local (embedded) in Rust processes__ — link `veddb-core` and operate in‑process using the same memory region.
+
+2) __Remote (experimental TCP)__ — connect to the server’s TCP port and exchange `Command` frames as raw bytes. A full gRPC service is planned.
+
+### 1) Local (embedded) usage in Rust
+
+Add to your Cargo project and use the `veddb-core` API to create or open an instance and execute commands:
+
+```rust
+use veddb_core::{VedDb, VedDbConfig, Command, Status};
+
+fn main() {
+    let config = VedDbConfig { memory_size: 128 * 1024 * 1024, ..Default::default() };
+    // Create (or open via VedDb::open("my_db"))
+    let db = VedDb::create("my_db", config).expect("create veddb");
+
+    // SET key=value
+    let set = Command::set(1, b"greeting".to_vec(), b"hello".to_vec());
+    let r1 = db.process_command(set);
+    assert_eq!(r1.header.status().unwrap(), Status::Ok);
+
+    // GET key
+    let get = Command::get(2, b"greeting".to_vec());
+    let r2 = db.process_command(get);
+    assert_eq!(r2.header.status().unwrap(), Status::Ok);
+    assert_eq!(r2.payload, b"hello");
+}
+```
+
+This is ideal for colocated services that want the absolute lowest latency and are comfortable using Rust.
+
+### 2) Remote (experimental TCP) usage
+
+`veddb-server` currently exposes a simple TCP listener on `--port` that accepts serialized `Command` messages and returns `Response` messages. Until the gRPC/QUIC surface is finalized, this is primarily for experimentation and internal testing.
+
+- Protocol structs: see `veddb-core/src/protocol.rs` for `Command`/`Response` formats.
+- Example flow: send `Command::set`, then `Command::get`, read back `Response` bytes.
+- Compatibility note: wire format is not yet stable; expect breaking changes before v1.0.
+
 ## Install and Build
 
 Prereqs:
@@ -138,6 +192,23 @@ nssm set VedDbServer Start SERVICE_AUTO_START
 nssm start VedDbServer
 ```
 
+## Releases
+
+Prebuilt binaries are published for each tag starting with `v*` via GitHub Actions.
+
+- Windows: `veddb-server-Windows.zip`
+- Linux: `veddb-server-Linux.tar.gz`
+- macOS: `veddb-server-macOS.tar.gz`
+
+How to create a release:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Then download artifacts from the GitHub Release page.
+
 ## Performance Goals
 
 - **Latency**: Sub-10µs p50 for local operations
@@ -154,6 +225,8 @@ Additional docs:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — deep dive into components and data flow
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit PRs
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community guidelines
+ - [SECURITY.md](SECURITY.md) — reporting vulnerabilities
+ - [CHANGELOG.md](CHANGELOG.md) — notable changes and versions
 
 ## Development
 
