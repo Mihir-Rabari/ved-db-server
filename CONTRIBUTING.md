@@ -81,4 +81,7 @@ If you discover a security issue, please follow [SECURITY.md](SECURITY.md) and d
 
 ## Questions
 
-Open a discussion or issue with the `question` label. We’re happy to help.
+Open a discussion or issue with the `question` label. For direct contact:
+
+- Email: __mihirrabari2604@gmail.com__
+- Instagram: __@mihirrabariii__

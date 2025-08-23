@@ -7,4 +7,4 @@ We are committed to fostering a welcoming and harassment-free community.
 - No harassment, discrimination, or personal attacks.
 - Follow project maintainers' guidance.
 
-Report unacceptable behavior to the maintainers via private email. Violations may result in corrective actions, including temporary or permanent bans.
+Report unacceptable behavior to the maintainers via private email at: __mihirrabari2604@gmail.com__. For general inquiries you can also reach out on Instagram: __@mihirrabariii__. Violations may result in corrective actions, including temporary or permanent bans.

@@ -40,3 +40,11 @@
 - `tracing` + `tracing-subscriber` with EnvFilter.
 - Periodic stats logging: ops count, keys, sessions, topics, memory.
 
+
+## Contact
+
+Questions about the architecture? Reach out:
+
+- Email: __mihirrabari2604@gmail.com__
+- Instagram: __@mihirrabariii__
+

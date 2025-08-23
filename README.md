@@ -33,6 +33,7 @@ VedDB is a blazing‑fast, shared‑memory key‑value database built in Rust. I
 - [Roadmap](#roadmap)
 - [Changelog](#changelog)
 - [Security](#security)
+- [Contact](#contact)
 - [License](#license)
 
 ## Features
@@ -247,6 +248,15 @@ See [ROADMAP.md](ROADMAP.md) for planned features and improvements.
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
+
+## Contact
+
+- Email: __mihirrabari2604@gmail.com__
+- Instagram: __@mihirrabariii__
 
 ## License
 
