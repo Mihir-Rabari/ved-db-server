@@ -104,7 +104,6 @@ cargo build --release
 ## 📖 Documentation
 
 * **Architecture Overview:** [ARCHITECTURE.md](ARCHITECTURE.md)
-* **Protocol Specification:** [docs/protocol.md](docs/protocol.md) (WIP)
 * **Changelog:** [CHANGELOG.md](./CHANGELOG.md)
 
 ---
