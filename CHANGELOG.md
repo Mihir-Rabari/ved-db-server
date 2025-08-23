@@ -1,13 +1,22 @@
 # Changelog
+All notable changes to this project will be documented in this file.
 
-All notable changes to this project will be documented in this file following [Keep a Changelog](https://keepachangelog.com/) format and [SemVer](https://semver.org/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-- Initial server-only repository setup
-- Core KV sharding, CAS support, shared memory arena
-- Server process with worker pool and periodic stats logging
-- CI: multi-OS build/test; Lint/format checks
-- Releases: GitHub Actions builds and uploads artifacts on `v*` tags
-- Docs: README overhaul (What is VedDB, Using VedDB, Releases), CONTRIBUTING, ROADMAP, ARCHITECTURE
-- Ops: Windows Service instructions (sc/NSSM)
+---
 
+## [0.0.1] - 2025-08-23
+### Added
+- Initial server implementation for **VedDB**.
+- Core database engine with in-memory storage backend.
+- Shared memory ring buffer (SPSC) for zero-copy communication.
+- Basic command execution support (`GET`, `SET`, `DELETE`).
+- Session management using unique session IDs.
+- Error handling and structured responses with `OpCode` and `Status`.
+- QUIC/gRPC stubs for planned networking layer integration.
+
+### Notes
+- This release is **server-only**.  
+- Client implementations are maintained in a separate repository.  
+- This version is a **prototype** release intended for testing shared memory performance.
