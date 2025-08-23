@@ -1,0 +1,21 @@
+[package]
+name = "veddb-server"
+version = "0.1.0"
+edition = "2021"
+description = "VedDB server with gRPC/QUIC endpoints and worker threads"
+
+[[bin]]
+name = "veddb-server"
+path = "src/main.rs"
+
+[dependencies]
+veddb-core = { path = "../veddb-core" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+clap = { version = "4.0", features = ["derive"] }
+num_cpus = "1.0"
+tokio-stream = { version = "0.1", features = ["net"] }
