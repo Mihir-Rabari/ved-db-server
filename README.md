@@ -8,7 +8,7 @@
 VedDB Server is a **high-performance, in-memory database server** built in Rust.
 It provides **zero-copy shared memory access** for local processes and an experimental **QUIC/gRPC networking layer** for remote connections.
 
-⚠️ **Currently, the server binary is only available and tested on Windows.** Other platforms are planned for future releases.
+⚠️ **Currently, the server binary is only available and tested on Windows.**.
 
 This repository contains the **server implementation only**. Client libraries are maintained in separate repositories.
 
@@ -23,7 +23,7 @@ This repository contains the **server implementation only**. Client libraries ar
   * Supports basic CRUD: `GET`, `SET`, `DELETE`.
 * **Concurrency & Performance**
 
-  * SPSC ring buffers for low-latency inter-process communication.
+  * SPSC ring buffers for zero-copy local IPC.
   * Worker pool with atomic operations for thread-safe sessions.
 * **Networking**
 
@@ -38,60 +38,92 @@ This repository contains the **server implementation only**. Client libraries ar
 
 ---
 
-## 📦 Installation & Running the Server (Windows Only)
+## 📦 Installation & Running (Windows)
 
-### Build from Source (Windows)
+### 1. Download the Server Binary
+
+* Download the Windows `.exe` for v0.0.1 from the **release assets**
+
+### 2. Place in Folder
+
+* Place in a folder of your choice, e.g., `C:\VedDB\`.
+
+### 3. Add Folder to System `PATH` (Optional, Recommended)
+
+Adding the folder to your environment variables lets you run `veddb-server-windows.exe` from **any location** in PowerShell or CMD.
+
+1. Press `Win + R`, type `sysdm.cpl`, and press **Enter**.
+2. Go to the **Advanced** tab → click **Environment Variables**.
+3. Under **System Variables**, find and select `Path`, then click **Edit**.
+4. Click **New** and add your folder path (e.g., `C:\VedDB\`).
+5. Click **OK** to save.
+6. Close and reopen PowerShell or CMD.
+
+Now you can run:
 
 ```powershell
-git clone https://github.com/Mihir-Rabari/ved-db-server.git
-cd ved-db-server
-cargo build --release
+veddb-server-windows --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
 ```
 
-### Run the Server
+from **any directory**.
+
+### 4. Open PowerShell or CMD
+
+If you didn’t add it to `PATH`, navigate manually:
 
 ```powershell
-.\target\release\ved-db-server.exe --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
+cd C:\VedDB\
+```
+
+### 5. Run the Server via CLI
+
+* Example command:
+
+```powershell
+veddb-server-windows.exe --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
 ```
 
 **Default server settings:**
 
-* Port: `50051`
-* Memory: `256MB`
-* Workers: `4`
+* **Port:** 50051
+* **Memory:** 256MB
+* **Workers:** 4
+
+The server will start in the current console. Logs and stats will print directly to the CLI.
+
+To stop the server, press `Ctrl+C` in PowerShell or CMD.
 
 ---
 
-## 💻 Building for Other Platforms (Experimental)
+## 💻 Building from Source
 
-You can **attempt to build the server on Linux or macOS**, but these builds are **not officially tested** in v0.0.1:
+If you want to build from source:
 
-### Linux / macOS
-
-```bash
-# Clone repo
+```powershell
 git clone https://github.com/Mihir-Rabari/ved-db-server.git
 cd ved-db-server
-
-# Build release binary
 cargo build --release
-
-# Run the server
-./target/release/ved-db-server --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
 ```
 
-**Notes:**
+### Experimental: Other Platforms
 
-* Shared memory and IPC behavior may differ between platforms.
-* QUIC/gRPC networking is experimental and may require additional dependencies.
-* Please report any platform-specific issues via GitHub Issues.
+Linux/macOS users can attempt to build from source:
+
+```bash
+git clone https://github.com/Mihir-Rabari/ved-db-server.git
+cd ved-db-server
+cargo build --release
+./target/release/veddb-server-windows --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
+```
+
+**Note:** Shared memory behavior and networking are experimental on non-Windows platforms.
 
 ---
 
 ## 🛠 Usage
 
 * Server binary only (Windows officially).
-* Client interaction through separate client repositories (Rust, Python, Go planned).
+* Client interaction through separate client repositories.
 * Supported commands in v0.0.1:
 
   * `GET key`
@@ -104,6 +136,7 @@ cargo build --release
 ## 📖 Documentation
 
 * **Architecture Overview:** [ARCHITECTURE.md](ARCHITECTURE.md)
+* **Protocol Specification:** [docs/protocol.md](docs/protocol.md) (WIP)
 * **Changelog:** [CHANGELOG.md](./CHANGELOG.md)
 
 ---
@@ -133,3 +166,5 @@ Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 ## 📄 License
 
 MIT License – see [LICENSE](LICENSE) for details.
+
+---
