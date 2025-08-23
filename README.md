@@ -86,7 +86,7 @@ veddb-server-windows.exe --create --name veddb_main --memory-mb 256 --workers 4 
 **Default server settings:**
 
 * **Port:** 50051
-* **Memory:** 256MB
+* **Memory:** 64MB
 * **Workers:** 4
 
 The server will start in the current console. Logs and stats will print directly to the CLI.
@@ -136,7 +136,6 @@ cargo build --release
 ## 📖 Documentation
 
 * **Architecture Overview:** [ARCHITECTURE.md](ARCHITECTURE.md)
-* **Protocol Specification:** [docs/protocol.md](docs/protocol.md) (WIP)
 * **Changelog:** [CHANGELOG.md](./CHANGELOG.md)
 
 ---
