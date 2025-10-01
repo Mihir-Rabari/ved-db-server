@@ -4,7 +4,7 @@
   <Product Id="*" 
            Name="VedDB Server" 
            Language="1033" 
-           Version="0.1.0" 
+           Version="0.1.1" 
            Manufacturer="VedDB Team" 
            UpgradeCode="12345678-1234-1234-1234-123456789012">
     
@@ -67,8 +67,8 @@
     <Property Id="ARPPRODUCTICON" Value="veddb.ico" />
     
     <!-- Add/Remove Programs -->
-    <Property Id="ARPHELPLINK" Value="https://github.com/yourusername/veddb" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/yourusername/veddb" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/mihir-Rabari/ved-db-server" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/mihir-Rabari/ved-db-server" />
   </Product>
 
   <!-- Components -->
@@ -91,7 +91,7 @@
         
         <Environment Id="VEDDB_VERSION" 
                      Name="VEDDB_VERSION" 
-                     Value="0.1.0" 
+                     Value="0.1.1" 
                      Permanent="no" 
                      Part="all" 
                      Action="set" 

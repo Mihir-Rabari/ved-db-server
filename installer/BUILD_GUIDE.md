@@ -429,7 +429,7 @@ msiexec /i output/VedDB-0.1.0.msi /qn /l*v install.log
 
 <div align="center">
 
-**Need Help?** Open an issue on [GitHub](https://github.com/yourusername/veddb/issues)
+**Need Help?** Open an issue on [GitHub](https://github.com/mihir-Rabari/ved-db-server/issues)
 
 [⬅️ Back to Installer README](README.md)
 

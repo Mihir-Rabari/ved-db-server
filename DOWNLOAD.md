@@ -7,7 +7,7 @@ Choose your platform and download the installer:
 ### MSI Installer (Recommended)
 **Easy installation with GUI wizard**
 
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20MSI-blue?style=for-the-badge&logo=windows)](https://github.com/yourusername/veddb/releases/latest/download/VedDB-Setup.msi)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20MSI-blue?style=for-the-badge&logo=windows)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/VedDB-Setup.msi)
 
 **Features:**
 - ✅ One-click installation
@@ -22,7 +22,7 @@ Choose your platform and download the installer:
 ### Portable Version
 **No installation required**
 
-[![Download Portable](https://img.shields.io/badge/Download-Windows%20Portable-lightblue?style=for-the-badge&logo=windows)](https://github.com/yourusername/veddb/releases/latest/download/veddb-server-windows.zip)
+[![Download Portable](https://img.shields.io/badge/Download-Windows%20Portable-lightblue?style=for-the-badge&logo=windows)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-windows.zip)
 
 **Just extract and run!**
 
@@ -32,11 +32,11 @@ Choose your platform and download the installer:
 
 ### x64 (64-bit)
 
-[![Download for Linux](https://img.shields.io/badge/Download-Linux%20x64-orange?style=for-the-badge&logo=linux)](https://github.com/yourusername/veddb/releases/latest/download/veddb-server-linux-x64.tar.gz)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux%20x64-orange?style=for-the-badge&logo=linux)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz)
 
 **Installation:**
 ```bash
-wget https://github.com/yourusername/veddb/releases/latest/download/veddb-server-linux-x64.tar.gz
+wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz
 tar -xzf veddb-server-linux-x64.tar.gz
 cd veddb-server
 sudo ./install.sh
@@ -53,7 +53,7 @@ sudo ./install.sh
 
 ### ARM64 (Raspberry Pi, ARM servers)
 
-[![Download for Linux ARM](https://img.shields.io/badge/Download-Linux%20ARM64-red?style=for-the-badge&logo=linux)](https://github.com/yourusername/veddb/releases/latest/download/veddb-server-linux-arm64.tar.gz)
+[![Download for Linux ARM](https://img.shields.io/badge/Download-Linux%20ARM64-red?style=for-the-badge&logo=linux)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-arm64.tar.gz)
 
 **Perfect for:**
 - Raspberry Pi 4/5
@@ -66,11 +66,11 @@ sudo ./install.sh
 
 ### Intel (x64)
 
-[![Download for macOS Intel](https://img.shields.io/badge/Download-macOS%20Intel-lightgrey?style=for-the-badge&logo=apple)](https://github.com/yourusername/veddb/releases/latest/download/veddb-server-macos-x64.tar.gz)
+[![Download for macOS Intel](https://img.shields.io/badge/Download-macOS%20Intel-lightgrey?style=for-the-badge&logo=apple)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos-x64.tar.gz)
 
 **Installation:**
 ```bash
-curl -LO https://github.com/yourusername/veddb/releases/latest/download/veddb-server-macos-x64.tar.gz
+curl -LO https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos-x64.tar.gz
 tar -xzf veddb-server-macos-x64.tar.gz
 cd veddb-server
 sudo ./install.sh
@@ -80,7 +80,7 @@ sudo ./install.sh
 
 ### Apple Silicon (M1/M2/M3)
 
-[![Download for macOS ARM](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-black?style=for-the-badge&logo=apple)](https://github.com/yourusername/veddb/releases/latest/download/veddb-server-macos-arm64.tar.gz)
+[![Download for macOS ARM](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-black?style=for-the-badge&logo=apple)](https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos-arm64.tar.gz)
 
 **Optimized for Apple Silicon chips**
 
@@ -97,7 +97,7 @@ docker pull veddb/server:latest
 docker run -d -p 50051:50051 veddb/server:latest
 ```
 
-[Docker Hub](https://hub.docker.com/r/veddb/server) | [Documentation](https://github.com/yourusername/veddb/blob/main/docs/docker.md)
+[Docker Hub](https://hub.docker.com/r/veddb/server) | [Documentation](https://github.com/mihir-Rabari/ved-db-server/blob/main/docs/docker.md)
 
 ---
 
@@ -141,7 +141,7 @@ Get-FileHash VedDB-Setup.msi
 sha256sum veddb-server-*.tar.gz
 
 # Compare with checksums.txt
-wget https://github.com/yourusername/veddb/releases/latest/download/checksums.txt
+wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/checksums.txt
 cat checksums.txt
 ```
 
@@ -151,18 +151,18 @@ cat checksums.txt
 
 - 📚 [Installation Guide](INSTALLATION_GUIDE.md)
 - 📖 [Documentation](README.md)
-- 💬 [Community Forum](https://github.com/yourusername/veddb/discussions)
-- 🐛 [Report Issues](https://github.com/yourusername/veddb/issues)
+- 💬 [Community Forum](https://github.com/mihir-Rabari/ved-db-server/discussions)
+- 🐛 [Report Issues](https://github.com/mihir-Rabari/ved-db-server/issues)
 
 ---
 
 ## Version History
 
-See all releases: [GitHub Releases](https://github.com/yourusername/veddb/releases)
+See all releases: [GitHub Releases](https://github.com/mihir-Rabari/ved-db-server/releases)
 
 **Latest Version:** v0.1.0  
 **Release Date:** 2024-01-15  
-**Release Notes:** [What's New](https://github.com/yourusername/veddb/releases/latest)
+**Release Notes:** [What's New](https://github.com/mihir-Rabari/ved-db-server/releases/latest)
 
 ---
 

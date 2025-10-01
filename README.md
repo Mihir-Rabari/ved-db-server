@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 <div align="center">
 
 # 🚀 VedDB Server
@@ -7,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/yourusername/veddb)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mihir-Rabari/ved-db-server)
 
 *Blazing-fast, zero-copy, shared-memory database built in Rust*
 
@@ -124,7 +123,7 @@ ved-db/
 
 1. **Download the MSI Installer**
    ```
-   https://github.com/yourusername/veddb/releases/latest/download/VedDB-Setup.msi
+   https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/VedDB-Setup.msi
    ```
 
 2. **Double-click the MSI file** and follow the wizard
@@ -143,7 +142,7 @@ That's it! The installer automatically sets up environment variables and adds Ve
 
 1. **Download the binary**
    ```bash
-   wget https://github.com/yourusername/veddb/releases/latest/download/veddb-server-linux-x64.tar.gz
+   wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz
    tar -xzf veddb-server-linux-x64.tar.gz
    cd veddb-server
    ```
@@ -162,7 +161,7 @@ That's it! The installer automatically sets up environment variables and adds Ve
 
 1. **Download the binary**
    ```bash
-   curl -LO https://github.com/yourusername/veddb/releases/latest/download/veddb-server-macos.tar.gz
+   curl -LO https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos.tar.gz
    tar -xzf veddb-server-macos.tar.gz
    cd veddb-server
    ```
@@ -200,7 +199,7 @@ veddb-server --create --name test_db --memory-mb 128 --workers 2 --port 50051
 
 #### Method 1: MSI Installer (Easiest)
 
-**Download:** [VedDB-Setup.msi](https://github.com/yourusername/veddb/releases/latest)
+**Download:** [VedDB-Setup.msi](https://github.com/mihir-Rabari/ved-db-server/releases/latest)
 
 The MSI installer provides:
 - ✅ **GUI wizard** - Easy step-by-step installation
@@ -216,7 +215,7 @@ msiexec /i VedDB-Setup.msi /quiet /qn
 
 #### Method 2: Portable Installation
 
-1. Download [veddb-server-windows.zip](https://github.com/yourusername/veddb/releases/latest)
+1. Download [veddb-server-windows.zip](https://github.com/mihir-Rabari/ved-db-server/releases/latest)
 2. Extract to any folder
 3. Add the folder to your PATH
 4. Run `veddb-server.exe`
@@ -227,7 +226,7 @@ msiexec /i VedDB-Setup.msi /quiet /qn
 
 ```bash
 # Download and extract
-wget https://github.com/yourusername/veddb/releases/latest/download/veddb-server-linux-x64.tar.gz
+wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz
 tar -xzf veddb-server-linux-x64.tar.gz
 cd veddb-server
 
@@ -262,7 +261,7 @@ sudo dnf install veddb-server
 
 ```bash
 # Download and extract
-curl -LO https://github.com/yourusername/veddb/releases/latest/download/veddb-server-macos.tar.gz
+curl -LO https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos.tar.gz
 tar -xzf veddb-server-macos.tar.gz
 cd veddb-server
 
@@ -421,8 +420,8 @@ sudo systemctl status veddb
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/veddb.git
-cd veddb/ved-db
+git clone https://github.com/mihir-Rabari/ved-db-server.git
+cd ved-db-server/ved-db
 
 # Build in release mode (optimized)
 cargo build --release

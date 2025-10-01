@@ -6,11 +6,11 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["VedDB Team"]
 license = "MIT"
-repository = "https://github.com/yourusername/veddb"
+repository = "https://github.com/mihir-Rabari/ved-db-server"
 
 [workspace.dependencies]
 # Core dependencies

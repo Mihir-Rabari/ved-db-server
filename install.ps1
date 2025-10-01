@@ -47,7 +47,7 @@ $scope = if ($isAdmin) { "Machine" } else { "User" }
 Write-Host "  VEDDB_HOME = $InstallPath" -ForegroundColor Green
 
 # Set VEDDB_VERSION
-$version = "0.1.0"
+$version = "0.1.1"
 [Environment]::SetEnvironmentVariable("VEDDB_VERSION", $version, $scope)
 Write-Host "  VEDDB_VERSION = $version" -ForegroundColor Green
 
