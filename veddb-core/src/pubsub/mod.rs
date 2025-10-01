@@ -1,19 +1,15 @@
 //! Pub/Sub system with topic-based message delivery
-//! 
+//!
 //! Provides high-performance topic-based messaging using MPMC rings
 //! with per-subscriber read indices for efficient delivery.
 
-pub mod topic;
 pub mod registry;
 pub mod subscriber;
+pub mod topic;
 
-pub use topic::*;
 pub use registry::*;
 pub use subscriber::*;
-
-use crate::ring::{MpmcRing, Slot};
-use crate::arena::Arena;
-use std::sync::atomic::{AtomicU64, Ordering};
+pub use topic::*;
 
 /// Pub/Sub configuration
 #[derive(Debug, Clone)]

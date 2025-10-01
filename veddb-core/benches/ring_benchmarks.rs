@@ -1,13 +1,13 @@
 //! Ring buffer performance benchmarks
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use veddb_core::ring::{SpscRingBuffer, MpmcRingBuffer, Slot};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
 use std::thread;
+use veddb_core::ring::{MpmcRingBuffer, Slot, SpscRingBuffer};
 
 fn bench_spsc_ring(c: &mut Criterion) {
     let mut group = c.benchmark_group("spsc_ring");
-    
+
     for capacity in [256, 1024, 4096].iter() {
         group.bench_with_input(
             BenchmarkId::new("single_threaded", capacity),
@@ -15,7 +15,7 @@ fn bench_spsc_ring(c: &mut Criterion) {
             |b, &capacity| {
                 let ring_buf = SpscRingBuffer::new(capacity);
                 let ring = ring_buf.ring();
-                
+
                 b.iter(|| {
                     let slot = Slot::inline_data(b"test_data").unwrap();
                     ring.push(black_box(slot));
@@ -23,7 +23,7 @@ fn bench_spsc_ring(c: &mut Criterion) {
                 });
             },
         );
-        
+
         group.bench_with_input(
             BenchmarkId::new("producer_consumer", capacity),
             capacity,
@@ -32,33 +32,33 @@ fn bench_spsc_ring(c: &mut Criterion) {
                     let ring_buf = Arc::new(SpscRingBuffer::new(capacity));
                     let ring_producer = ring_buf.clone();
                     let ring_consumer = ring_buf.clone();
-                    
+
                     let producer = thread::spawn(move || {
                         for i in 0..1000 {
                             let slot = Slot::arena_offset(8, i as u64);
                             ring_producer.ring().push(slot);
                         }
                     });
-                    
+
                     let consumer = thread::spawn(move || {
                         for _ in 0..1000 {
                             let _slot = ring_consumer.ring().pop();
                         }
                     });
-                    
+
                     producer.join().unwrap();
                     consumer.join().unwrap();
                 });
             },
         );
     }
-    
+
     group.finish();
 }
 
 fn bench_mpmc_ring(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpmc_ring");
-    
+
     for capacity in [256, 1024, 4096].iter() {
         group.bench_with_input(
             BenchmarkId::new("single_threaded", capacity),
@@ -66,7 +66,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
             |b, &capacity| {
                 let ring_buf = MpmcRingBuffer::new(capacity);
                 let ring = ring_buf.ring();
-                
+
                 b.iter(|| {
                     let slot = Slot::inline_data(b"test_data").unwrap();
                     ring.push(black_box(slot));
@@ -74,7 +74,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
                 });
             },
         );
-        
+
         group.bench_with_input(
             BenchmarkId::new("multi_producer_consumer", capacity),
             capacity,
@@ -82,7 +82,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
                 b.iter(|| {
                     let ring_buf = Arc::new(MpmcRingBuffer::new(capacity));
                     let mut handles = Vec::new();
-                    
+
                     // 2 producers
                     for producer_id in 0..2 {
                         let ring = ring_buf.clone();
@@ -95,7 +95,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
                         });
                         handles.push(handle);
                     }
-                    
+
                     // 2 consumers
                     for _ in 0..2 {
                         let ring = ring_buf.clone();
@@ -106,7 +106,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
                         });
                         handles.push(handle);
                     }
-                    
+
                     for handle in handles {
                         handle.join().unwrap();
                     }
@@ -114,7 +114,7 @@ fn bench_mpmc_ring(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 

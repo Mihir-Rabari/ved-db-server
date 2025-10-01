@@ -1,16 +1,16 @@
 //! VedDB core structure that ties all components together
-//! 
+//!
 //! Provides the main VedDB instance with shared memory layout,
 //! component initialization, and high-level operations.
 
 use crate::{
     arena::Arena,
-    kv::{KvStore, KvConfig, KvError},
-    session::{SessionRegistry, SessionManager, SessionError, SessionId},
-    pubsub::{TopicRegistry, PubSubConfig, PubSubError},
-    protocol::{Command, Response, OpCode, Status},
-    ring::Slot,
+    kv::{KvConfig, KvError, KvStore},
     memory::SharedMemory,
+    protocol::{Command, OpCode, Response, Status},
+    pubsub::{PubSubConfig, PubSubError, TopicRegistry},
+    ring::Slot,
+    session::{SessionError, SessionId, SessionManager, SessionRegistry},
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,7 +56,7 @@ pub struct VedDbHeader {
     pub last_access: AtomicU64,
     /// Global sequence counter
     pub sequence: AtomicU64,
-    
+
     /// Component offsets in shared memory
     pub arena_offset: u64,
     pub arena_size: u64,
@@ -66,10 +66,10 @@ pub struct VedDbHeader {
     pub session_registry_size: u64,
     pub topic_registry_offset: u64,
     pub topic_registry_size: u64,
-    
+
     /// Configuration
     pub config: VedDbConfig,
-    
+
     /// Statistics
     pub total_operations: AtomicU64,
     pub uptime_start: u64,
@@ -78,13 +78,13 @@ pub struct VedDbHeader {
 impl VedDbHeader {
     const MAGIC: u64 = 0x5645444200000001; // "VEDB" + version
     const VERSION: u32 = 1;
-    
+
     pub fn new(config: VedDbConfig) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         Self {
             magic: Self::MAGIC,
             version: Self::VERSION,
@@ -106,11 +106,11 @@ impl VedDbHeader {
             uptime_start: now,
         }
     }
-    
+
     pub fn is_valid(&self) -> bool {
         self.magic == Self::MAGIC && self.version == Self::VERSION
     }
-    
+
     pub fn touch(&self) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -118,7 +118,7 @@ impl VedDbHeader {
             .as_secs();
         self.last_access.store(now, Ordering::Relaxed);
     }
-    
+
     pub fn next_sequence(&self) -> u64 {
         self.sequence.fetch_add(1, Ordering::Relaxed)
     }
@@ -137,70 +137,69 @@ pub struct VedDb {
 impl VedDb {
     /// Create a new VedDB instance
     pub fn create(name: &str, config: VedDbConfig) -> Result<Self, VedDbError> {
-        let shared_memory = SharedMemory::create(name, config.memory_size)
-            .map_err(VedDbError::Memory)?;
-        
+        let shared_memory =
+            SharedMemory::create(name, config.memory_size).map_err(VedDbError::Memory)?;
+
         unsafe { Self::init_new(shared_memory, config) }
     }
-    
+
     /// Open an existing VedDB instance
     pub fn open(name: &str) -> Result<Self, VedDbError> {
-        let shared_memory = SharedMemory::open(name)
-            .map_err(VedDbError::Memory)?;
-        
+        let shared_memory = SharedMemory::open(name).map_err(VedDbError::Memory)?;
+
         unsafe { Self::init_existing(shared_memory) }
     }
-    
+
     /// Initialize a new VedDB instance
-    unsafe fn init_new(shared_memory: SharedMemory, config: VedDbConfig) -> Result<Self, VedDbError> {
+    unsafe fn init_new(
+        shared_memory: SharedMemory,
+        config: VedDbConfig,
+    ) -> Result<Self, VedDbError> {
         let base_ptr = shared_memory.as_ptr();
         let mut offset = 0;
-        
+
         // Initialize header
         let header = base_ptr as *mut VedDbHeader;
         std::ptr::write(header, VedDbHeader::new(config.clone()));
         offset += std::mem::size_of::<VedDbHeader>();
-        
+
         // Calculate component sizes
         let arena_size = config.memory_size / 2; // Use half for arena
         let kv_size = KvStore::size_for_config(&config.kv_config);
         let session_size = SessionRegistry::size_for_max_sessions(config.max_sessions);
         let topic_size = TopicRegistry::size_for_max_topics(config.pubsub_config.max_topics);
-        
+
         // Initialize arena
         let arena_ptr = base_ptr.add(offset);
         let arena = Arena::init(arena_ptr, arena_size);
         (*header).arena_offset = offset as u64;
         (*header).arena_size = arena_size as u64;
         offset += arena_size;
-        
+
         // Initialize KV store
         let kv_ptr = base_ptr.add(offset);
         let kv_store = KvStore::init(kv_ptr, &config.kv_config, arena);
         (*header).kv_store_offset = offset as u64;
         (*header).kv_store_size = kv_size as u64;
         offset += kv_size;
-        
+
         // Initialize session registry
         let session_ptr = base_ptr.add(offset);
         let session_registry = SessionRegistry::init(session_ptr, config.max_sessions);
         (*header).session_registry_offset = offset as u64;
         (*header).session_registry_size = session_size as u64;
         offset += session_size;
-        
+
         // Initialize topic registry
         let topic_ptr = base_ptr.add(offset);
         let topic_registry = TopicRegistry::init(topic_ptr, config.pubsub_config.max_topics);
         (*header).topic_registry_offset = offset as u64;
         (*header).topic_registry_size = topic_size as u64;
-        
+
         // Create session manager
-        let session_manager = SessionManager::new(
-            session_registry,
-            arena,
-            config.session_ring_capacity,
-        );
-        
+        let session_manager =
+            SessionManager::new(session_registry, arena, config.session_ring_capacity);
+
         Ok(Self {
             shared_memory,
             header,
@@ -210,28 +209,30 @@ impl VedDb {
             topic_registry,
         })
     }
-    
+
     /// Initialize from existing shared memory
     unsafe fn init_existing(shared_memory: SharedMemory) -> Result<Self, VedDbError> {
         let base_ptr = shared_memory.as_ptr();
         let header = base_ptr as *mut VedDbHeader;
-        
+
         if !(*header).is_valid() {
             return Err(VedDbError::InvalidHeader);
         }
-        
+
         // Get component pointers from offsets
         let arena = base_ptr.add((*header).arena_offset as usize) as *mut Arena;
         let kv_store = base_ptr.add((*header).kv_store_offset as usize) as *mut KvStore;
-        let session_registry = base_ptr.add((*header).session_registry_offset as usize) as *mut SessionRegistry;
-        let topic_registry = base_ptr.add((*header).topic_registry_offset as usize) as *mut TopicRegistry;
-        
+        let session_registry =
+            base_ptr.add((*header).session_registry_offset as usize) as *mut SessionRegistry;
+        let topic_registry =
+            base_ptr.add((*header).topic_registry_offset as usize) as *mut TopicRegistry;
+
         let session_manager = SessionManager::new(
             session_registry,
             arena,
             (*header).config.session_ring_capacity,
         );
-        
+
         Ok(Self {
             shared_memory,
             header,
@@ -241,12 +242,14 @@ impl VedDb {
             topic_registry,
         })
     }
-    
+
     /// Process a command and return response
     pub fn process_command(&self, command: Command) -> Response {
         self.header().touch();
-        self.header().total_operations.fetch_add(1, Ordering::Relaxed);
-        
+        self.header()
+            .total_operations
+            .fetch_add(1, Ordering::Relaxed);
+
         match command.header.opcode() {
             Ok(OpCode::Ping) => self.handle_ping(command),
             Ok(OpCode::Set) => self.handle_set(command),
@@ -260,11 +263,11 @@ impl VedDb {
             _ => Response::error(command.header.seq),
         }
     }
-    
+
     fn handle_ping(&self, command: Command) -> Response {
         Response::ok(command.header.seq, b"pong".to_vec())
     }
-    
+
     fn handle_set(&self, command: Command) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         match kv_store.set(&command.key, &command.value) {
@@ -275,7 +278,7 @@ impl VedDb {
             _ => Response::error(command.header.seq),
         }
     }
-    
+
     fn handle_get(&self, command: Command) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         match kv_store.get(&command.key) {
@@ -283,7 +286,7 @@ impl VedDb {
             None => Response::not_found(command.header.seq),
         }
     }
-    
+
     fn handle_delete(&self, command: Command) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         if kv_store.delete(&command.key) {
@@ -292,11 +295,11 @@ impl VedDb {
             Response::not_found(command.header.seq)
         }
     }
-    
+
     fn handle_cas(&self, command: Command) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         let expected_version = command.header.extra;
-        
+
         match kv_store.cas(&command.key, expected_version, &command.value) {
             Ok(new_version) => {
                 let mut resp = Response::ok(command.header.seq, Vec::new());
@@ -305,46 +308,49 @@ impl VedDb {
             }
             Err(KvError::NotFound) => Response::not_found(command.header.seq),
             Err(KvError::VersionMismatch) => {
-                let mut resp = Response::new(Status::VersionMismatch, command.header.seq, Vec::new());
-                resp
+                Response::new(Status::VersionMismatch, command.header.seq, Vec::new())
             }
             _ => Response::error(command.header.seq),
         }
     }
-    
+
     fn handle_subscribe(&self, _command: Command) -> Response {
         // TODO: Implement subscription logic
         Response::error(_command.header.seq)
     }
-    
+
     fn handle_unsubscribe(&self, _command: Command) -> Response {
         // TODO: Implement unsubscription logic
         Response::error(_command.header.seq)
     }
-    
+
     fn handle_publish(&self, _command: Command) -> Response {
         // TODO: Implement publish logic
         Response::error(_command.header.seq)
     }
-    
+
     fn handle_info(&self, command: Command) -> Response {
         let stats = self.get_stats();
         let info_json = serde_json::to_vec(&stats).unwrap_or_default();
         Response::ok(command.header.seq, info_json)
     }
-    
+
     /// Attach a new session
     pub fn attach_session(&self, pid: u32) -> Result<SessionId, SessionError> {
         self.session_manager.attach_session(pid)
     }
-    
+
     /// Detach a session
     pub fn detach_session(&self, session_id: SessionId) -> Result<(), SessionError> {
         self.session_manager.detach_session(session_id)
     }
-    
+
     /// Send response to a session
-    pub fn send_response(&self, session_id: SessionId, response: Response) -> Result<(), SessionError> {
+    pub fn send_response(
+        &self,
+        session_id: SessionId,
+        response: Response,
+    ) -> Result<(), SessionError> {
         let response_bytes = response.to_bytes();
         let slot = if response_bytes.len() <= 8 {
             Slot::inline_data(&response_bytes).unwrap()
@@ -361,10 +367,10 @@ impl VedDb {
             }
             Slot::arena_offset(response_bytes.len() as u32, offset)
         };
-        
+
         self.session_manager.send_response(session_id, slot)
     }
-    
+
     /// Get current statistics
     pub fn get_stats(&self) -> VedDbStats {
         let header = self.header();
@@ -398,22 +404,23 @@ impl VedDb {
             active_topics,
         }
     }
-    
+
     /// Get list of active session IDs
     pub fn get_active_sessions(&self) -> Vec<SessionId> {
         self.session_manager.get_active_sessions()
     }
-    
+
     /// Try to get a command from a session's command ring
     pub fn try_get_command(&self, session_id: SessionId) -> Result<Option<Command>, VedDbError> {
         Ok(self.session_manager.try_get_command(session_id)?)
     }
-    
+
     /// Clean up stale sessions
     pub fn cleanup_stale_sessions(&self) -> usize {
-        self.session_manager.cleanup_stale_sessions(self.header().config.session_timeout_secs)
+        self.session_manager
+            .cleanup_stale_sessions(self.header().config.session_timeout_secs)
     }
-    
+
     fn header(&self) -> &VedDbHeader {
         unsafe { &*self.header }
     }
@@ -458,52 +465,52 @@ mod tests {
     fn test_veddb_creation() {
         let config = VedDbConfig::default();
         let veddb = VedDb::create("test_veddb", config).unwrap();
-        
+
         let stats = veddb.get_stats();
         assert_eq!(stats.kv_keys, 0);
         assert_eq!(stats.active_sessions, 0);
     }
-    
+
     #[test]
     fn test_veddb_kv_operations() {
         let config = VedDbConfig::default();
         let veddb = VedDb::create("test_kv", config).unwrap();
-        
+
         // Test SET
         let set_cmd = Command::set(1, b"key1".to_vec(), b"value1".to_vec());
         let resp = veddb.process_command(set_cmd);
         assert_eq!(resp.header.status().unwrap(), Status::Ok);
-        
+
         // Test GET
         let get_cmd = Command::get(2, b"key1".to_vec());
         let resp = veddb.process_command(get_cmd);
         assert_eq!(resp.header.status().unwrap(), Status::Ok);
         assert_eq!(resp.payload, b"value1");
-        
+
         // Test DELETE
         let del_cmd = Command::del(3, b"key1".to_vec());
         let resp = veddb.process_command(del_cmd);
         assert_eq!(resp.header.status().unwrap(), Status::Ok);
-        
+
         // Test GET after delete
         let get_cmd = Command::get(4, b"key1".to_vec());
         let resp = veddb.process_command(get_cmd);
         assert_eq!(resp.header.status().unwrap(), Status::NotFound);
     }
-    
+
     #[test]
     fn test_veddb_sessions() {
         let config = VedDbConfig::default();
         let veddb = VedDb::create("test_sessions", config).unwrap();
-        
+
         // Attach session
         let session_id = veddb.attach_session(1234).unwrap();
         assert!(session_id > 0);
-        
+
         // Send response
         let response = Response::ok(1, b"test".to_vec());
         veddb.send_response(session_id, response).unwrap();
-        
+
         // Detach session
         veddb.detach_session(session_id).unwrap();
     }

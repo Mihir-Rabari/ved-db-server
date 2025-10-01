@@ -1,5 +1,5 @@
 //! Shared memory management utilities
-//! 
+//!
 //! Provides cross-platform shared memory creation and mapping with support for:
 //! - memfd on Linux (preferred)
 //! - Named shared memory as fallback
@@ -25,16 +25,15 @@ pub struct SharedMemory {
 
 impl SharedMemory {
     /// Create a new shared memory segment with the given size
-    /// 
+    ///
     /// On Linux, uses memfd_create for anonymous shared memory.
     /// Falls back to named shared memory on other platforms.
     pub fn create(name: &str, size: usize) -> Result<Self> {
         #[cfg(target_os = "linux")]
         {
-            Self::create_memfd(name, size)
-                .or_else(|_| Self::create_named(name, size))
+            Self::create_memfd(name, size).or_else(|_| Self::create_named(name, size))
         }
-        
+
         #[cfg(not(target_os = "linux"))]
         {
             Self::create_named(name, size)
@@ -44,16 +43,14 @@ impl SharedMemory {
     /// Create shared memory using memfd (Linux only)
     #[cfg(target_os = "linux")]
     fn create_memfd(name: &str, size: usize) -> Result<Self> {
-        let fd = memfd_create(name, MemFdCreateFlag::MFD_CLOEXEC)
-            .context("Failed to create memfd")?;
-        
-        ftruncate(fd, size as i64)
-            .context("Failed to set memfd size")?;
-        
+        let fd =
+            memfd_create(name, MemFdCreateFlag::MFD_CLOEXEC).context("Failed to create memfd")?;
+
+        ftruncate(fd, size as i64).context("Failed to set memfd size")?;
+
         let file = unsafe { std::fs::File::from_raw_fd(fd) };
-        let mmap = unsafe { MmapMut::map_mut(&file) }
-            .context("Failed to mmap memfd")?;
-        
+        let mmap = unsafe { MmapMut::map_mut(&file) }.context("Failed to mmap memfd")?;
+
         Ok(Self {
             mmap,
             size,
@@ -85,18 +82,17 @@ impl SharedMemory {
             .truncate(true)
             .open(&path)
             .context("Failed to create named shared memory")?;
-        
+
         file.set_len(size as u64)
             .context("Failed to set shared memory size")?;
-        
-        let mmap = unsafe { MmapMut::map_mut(&file) }
-            .context("Failed to mmap shared memory")?;
-        
+
+        let mmap = unsafe { MmapMut::map_mut(&file) }.context("Failed to mmap shared memory")?;
+
         let cleanup_path = path.clone();
         let cleanup = Box::new(move || {
             let _ = std::fs::remove_file(&cleanup_path);
         });
-        
+
         Ok(Self {
             mmap,
             size,
@@ -124,12 +120,11 @@ impl SharedMemory {
             .write(true)
             .open(&path)
             .context("Failed to open shared memory")?;
-        
-        let mmap = unsafe { MmapMut::map_mut(&file) }
-            .context("Failed to mmap shared memory")?;
-        
+
+        let mmap = unsafe { MmapMut::map_mut(&file) }.context("Failed to mmap shared memory")?;
+
         let size = mmap.len();
-        
+
         Ok(Self {
             mmap,
             size,
@@ -148,7 +143,7 @@ impl SharedMemory {
     }
 
     /// Convert an offset to a pointer
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure the offset is valid and within bounds
     pub unsafe fn offset_to_ptr<T>(&self, offset: u64) -> *mut T {
@@ -156,7 +151,7 @@ impl SharedMemory {
     }
 
     /// Convert a pointer to an offset
-    /// 
+    ///
     /// # Safety
     /// The pointer must be within this shared memory segment
     pub unsafe fn ptr_to_offset<T>(&self, ptr: *const T) -> u64 {
@@ -180,7 +175,7 @@ mod tests {
     fn test_shared_memory_creation() {
         let shm = SharedMemory::create("test", 4096).unwrap();
         assert_eq!(shm.size, 4096);
-        
+
         // Write some data
         unsafe {
             let ptr = shm.as_ptr();
@@ -192,14 +187,14 @@ mod tests {
     #[test]
     fn test_offset_conversion() {
         let shm = SharedMemory::create("test_offset", 4096).unwrap();
-        
+
         unsafe {
             let ptr = shm.offset_to_ptr::<u64>(100);
             *ptr = 0xdeadbeef;
-            
+
             let offset = shm.ptr_to_offset(ptr);
             assert_eq!(offset, 100);
-            
+
             let ptr2 = shm.offset_to_ptr::<u64>(offset);
             assert_eq!(*ptr2, 0xdeadbeef);
         }

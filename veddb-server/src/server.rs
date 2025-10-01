@@ -1,14 +1,13 @@
 //! gRPC server implementation for remote VedDB access
-//! 
+//!
 //! Provides streaming RPC interface for remote clients to interact
 //! with VedDB over the network.
 
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{info, warn, error};
-use veddb_core::{VedDb, Command, Response};
+use tracing::{error, info, warn};
+use veddb_core::{Command, Response, VedDb};
 
 /// VedDB gRPC server
 pub struct VedDbServer {
@@ -19,23 +18,23 @@ impl VedDbServer {
     pub fn new(veddb: Arc<VedDb>) -> Self {
         Self { veddb }
     }
-    
+
     /// Start the gRPC server on the specified port
     pub async fn serve(self, port: u16) -> Result<()> {
         let addr = format!("0.0.0.0:{}", port);
         info!("Starting gRPC server on {}", addr);
-        
+
         // For now, implement a simple TCP server
         // In production, you'd use tonic for proper gRPC
         let listener = TcpListener::bind(&addr).await?;
         info!("gRPC server listening on {}", addr);
-        
+
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     info!("New client connection from {}", addr);
                     let veddb = self.veddb.clone();
-                    
+
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_client(veddb, stream).await {
                             warn!("Client {} error: {}", addr, e);
@@ -48,20 +47,17 @@ impl VedDbServer {
             }
         }
     }
-    
+
     /// Handle a single client connection
-    async fn handle_client(
-        veddb: Arc<VedDb>,
-        mut stream: tokio::net::TcpStream,
-    ) -> Result<()> {
+    async fn handle_client(veddb: Arc<VedDb>, mut stream: tokio::net::TcpStream) -> Result<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        
+
         // Attach a session for this client
         let session_id = veddb.attach_session(std::process::id())?;
         info!("Attached session {} for remote client", session_id);
-        
+
         let mut buffer = vec![0u8; 8192];
-        
+
         loop {
             // Read command from client
             match stream.read(&mut buffer).await {
@@ -75,7 +71,7 @@ impl VedDbServer {
                         Ok(command) => {
                             // Process command
                             let response = veddb.process_command(command);
-                            
+
                             // Send response back
                             let response_bytes = response.to_bytes();
                             if let Err(e) = stream.write_all(&response_bytes).await {
@@ -98,12 +94,12 @@ impl VedDbServer {
                 }
             }
         }
-        
+
         // Cleanup session
         if let Err(e) = veddb.detach_session(session_id) {
             warn!("Failed to detach session {}: {}", session_id, e);
         }
-        
+
         Ok(())
     }
 }
