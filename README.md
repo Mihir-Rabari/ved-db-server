@@ -20,8 +20,6 @@ VedDB Server is a fast, lightweight, and easy-to-use in-memory database designed
 
 ## 🚀 Quick Start
 
-### Download & Installation (Windows)
-
 VedDB Server is currently tested and supported on **Windows**. You can download the pre-built executable:
 
 **Option 1: Download from Website**
@@ -32,10 +30,6 @@ VedDB Server is currently tested and supported on **Windows**. You can download 
 - Download `veddb-server-v0.1.21-windows.exe`
 
 ### Running the Server
-
-```
-# Run with default settings (64MB memory, 4 workers, port 50051)
-veddb-server.exe
 
 # Or with custom configuration
 veddb-server.exe --memory 128 --workers 8 --port 50051
