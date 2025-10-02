@@ -14,9 +14,11 @@ pub mod protocol;
 pub mod pubsub;
 pub mod ring;
 pub mod session;
+pub mod simple_kv;
 
 pub use arena::*;
 pub use core::*;
 pub use memory::*;
 pub use protocol::*;
 pub use ring::*;
+pub use simple_kv::SimpleKvStore;

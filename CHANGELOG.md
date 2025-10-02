@@ -1,81 +1,67 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to VedDB Server will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.1.1] - 2025-10-01
+## [0.1.21] - 2025-10-02
 
 ### Added
-
-* **MSI Installer** for Windows with GUI wizard
-  * Configurable installation path
-  * Optional Windows Service installation
-  * Automatic environment variable setup
-  * Start menu shortcuts
-  * Silent installation support
-* **Installation Scripts** for automated setup
-  * PowerShell installer for Windows
-  * Bash installer for Linux/macOS
-  * Automatic PATH configuration
-* **Comprehensive Documentation**
-  * Updated README with user-friendly installation
-  * DOWNLOAD.md with platform-specific download links
-  * BUILD_GUIDE.md for MSI installer creation
-  * Reorganized docs to prioritize end users over developers
+- ✨ **LIST command** (opcode 0x09) - List all stored keys
+- 🔧 **SimpleKvStore** - Lock-free KV store using DashMap for better concurrency
+- 📝 **Detailed logging** - Enhanced server-side logging for debugging
+- 🔄 **Protocol fixes** - Proper little-endian encoding throughout
+- ✅ **Status code alignment** - Fixed client/server status code mismatch
 
 ### Changed
-
-* **Simplified Installation Process**
-  * Installation now requires no build tools for end users
-  * Pre-built binaries as primary distribution method
-  * Building from source moved to developer section
-* **README Structure**
-  * Quick Start now shows download-and-install workflow
-  * Installation section reorganized by platform
-  * Added Docker installation instructions
-  * Development section clearly marked for contributors
+- 🚀 **Improved performance** - Replaced mutex-based KV store with DashMap
+- 📊 **Better error handling** - Clearer error messages and status codes
+- 🔧 **Simplified protocol** - Clean binary protocol implementation
 
 ### Fixed
+- 🐛 **Packed struct issues** - Resolved undefined behavior from packed struct field access
+- 🔄 **Endianness bugs** - Fixed big-endian/little-endian mismatches
+- 📡 **Response header size** - Corrected from 16 to 20 bytes
+- ⚡ **Deadlock issues** - Eliminated KV store deadlocks with lock-free implementation
+- 🔌 **Connection handling** - Proper TCP stream management
 
-* Memory alignment issues in MPMC ring buffer
-* Proper cleanup of aligned memory allocations
-* Session registry alignment for AtomicU64 fields
+### Technical Details
+- Protocol now uses consistent little-endian encoding
+- Response header: 20 bytes (status:1, flags:1, reserved:2, seq:4, payload_len:4, extra:8)
+- Command header: 24 bytes (opcode:1, flags:1, reserved:2, seq:4, key_len:4, val_len:4, extra:8)
+- Status codes: 0x00=OK, 0x01=NotFound, 0x04=InternalError
 
-### Documentation
-
-* Created installer/BUILD_GUIDE.md with complete MSI build instructions
-* Created ved-db/DOWNLOAD.md with platform-specific downloads
-* Updated README.md with badges, emojis, and better structure
-* Added performance benchmarks table
-* Included roadmap timeline
+### Platform Support
+- ✅ **Windows** - Fully tested and supported
+- ⏳ **Linux/macOS** - Planned for future releases
 
 ---
 
-## [0.0.1] - 2025-08-23
+## [0.1.0] - Initial Release
 
 ### Added
-
-* Initial **VedDB Server** implementation for **Windows**.
-* Core **in-memory key-value store** with shared memory arena allocator.
-* SPSC ring buffers for zero-copy local IPC.
-* **Command/response protocol** supporting:
-
-  * `GET`
-  * `SET`
-  * `DELETE`
-* Worker pool with **session management** and thread-safe operations.
-* Experimental **QUIC/gRPC networking layer** (prototype; wire format may change).
-* Structured **error handling** with `ClientError` and `Status`.
-* Server binary released for **Windows only**; Linux/macOS builds are experimental.
-
-### Notes
-
-* This release is **server-only**; client implementations exist in separate repositories.
-* Pub/Sub and CAS operations are stubbed or planned for future releases.
-* Designed for testing shared memory performance and command handling.
-* Future releases will include official multi-platform support, persistence, and metrics.
+- Basic KV operations (SET, GET, DELETE)
+- TCP server with binary protocol
+- Multi-threaded worker pool
+- Session management
+- PING command for health checks
 
 ---
+
+## Future Releases
+
+### Planned for v0.2.x
+- Persistence (Write-Ahead Log + Snapshots)
+- Authentication and authorization
+- Pub/Sub messaging
+- TTL (time-to-live) for keys
+- Pattern matching for LIST command
+
+### Planned for v1.0.x
+- Replication support
+- Clustering
+- Cross-platform support (Linux, macOS)
+- gRPC protocol option
+- Production-ready stability

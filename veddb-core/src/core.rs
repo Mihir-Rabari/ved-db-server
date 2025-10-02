@@ -250,89 +250,101 @@ impl VedDb {
             .total_operations
             .fetch_add(1, Ordering::Relaxed);
 
+        // Copy seq from packed struct safely
+        let seq = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(command.header.seq)) };
+
         match command.header.opcode() {
-            Ok(OpCode::Ping) => self.handle_ping(command),
-            Ok(OpCode::Set) => self.handle_set(command),
-            Ok(OpCode::Get) => self.handle_get(command),
-            Ok(OpCode::Del) => self.handle_delete(command),
-            Ok(OpCode::Cas) => self.handle_cas(command),
-            Ok(OpCode::Subscribe) => self.handle_subscribe(command),
-            Ok(OpCode::Unsubscribe) => self.handle_unsubscribe(command),
-            Ok(OpCode::Publish) => self.handle_publish(command),
-            Ok(OpCode::Info) => self.handle_info(command),
-            _ => Response::error(command.header.seq),
+            Ok(OpCode::Ping) => self.handle_ping(command, seq),
+            Ok(OpCode::Set) => self.handle_set(command, seq),
+            Ok(OpCode::Get) => self.handle_get(command, seq),
+            Ok(OpCode::Del) => self.handle_delete(command, seq),
+            Ok(OpCode::Cas) => self.handle_cas(command, seq),
+            Ok(OpCode::Subscribe) => self.handle_subscribe(command, seq),
+            Ok(OpCode::Unsubscribe) => self.handle_unsubscribe(command, seq),
+            Ok(OpCode::Publish) => self.handle_publish(command, seq),
+            Ok(OpCode::Info) => self.handle_info(command, seq),
+            _ => Response::error(seq),
         }
     }
 
-    fn handle_ping(&self, command: Command) -> Response {
-        Response::ok(command.header.seq, b"pong".to_vec())
+    fn handle_ping(&self, _command: Command, seq: u32) -> Response {
+        Response::ok(seq, b"pong".to_vec())
     }
 
-    fn handle_set(&self, command: Command) -> Response {
+    fn handle_set(&self, command: Command, seq: u32) -> Response {
+        eprintln!("DEBUG: handle_set called, key len: {}, val len: {}", command.key.len(), command.value.len());
         let kv_store = unsafe { &*self.kv_store };
-        match kv_store.set(&command.key, &command.value) {
-            Ok(()) => Response::ok(command.header.seq, Vec::new()),
-            Err(KvError::KeyTooLarge) => Response::error(command.header.seq),
-            Err(KvError::ValueTooLarge) => Response::error(command.header.seq),
-            Err(KvError::OutOfMemory) => Response::error(command.header.seq),
-            _ => Response::error(command.header.seq),
+        eprintln!("DEBUG: Got kv_store pointer");
+        
+        let result = kv_store.set(&command.key, &command.value);
+        eprintln!("DEBUG: kv_store.set returned: {:?}", result);
+        
+        match result {
+            Ok(()) => {
+                eprintln!("DEBUG: Returning OK response");
+                Response::ok(seq, Vec::new())
+            },
+            Err(KvError::KeyTooLarge) => Response::error(seq),
+            Err(KvError::ValueTooLarge) => Response::error(seq),
+            Err(KvError::OutOfMemory) => Response::error(seq),
+            _ => Response::error(seq),
         }
     }
 
-    fn handle_get(&self, command: Command) -> Response {
+    fn handle_get(&self, command: Command, seq: u32) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         match kv_store.get(&command.key) {
-            Some(value) => Response::ok(command.header.seq, value),
-            None => Response::not_found(command.header.seq),
+            Some(value) => Response::ok(seq, value),
+            None => Response::not_found(seq),
         }
     }
 
-    fn handle_delete(&self, command: Command) -> Response {
+    fn handle_delete(&self, command: Command, seq: u32) -> Response {
         let kv_store = unsafe { &*self.kv_store };
         if kv_store.delete(&command.key) {
-            Response::ok(command.header.seq, Vec::new())
+            Response::ok(seq, Vec::new())
         } else {
-            Response::not_found(command.header.seq)
+            Response::not_found(seq)
         }
     }
 
-    fn handle_cas(&self, command: Command) -> Response {
+    fn handle_cas(&self, command: Command, seq: u32) -> Response {
         let kv_store = unsafe { &*self.kv_store };
-        let expected_version = command.header.extra;
+        let expected_version = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(command.header.extra)) };
 
         match kv_store.cas(&command.key, expected_version, &command.value) {
             Ok(new_version) => {
-                let mut resp = Response::ok(command.header.seq, Vec::new());
+                let mut resp = Response::ok(seq, Vec::new());
                 resp.header.extra = new_version;
                 resp
             }
-            Err(KvError::NotFound) => Response::not_found(command.header.seq),
+            Err(KvError::NotFound) => Response::not_found(seq),
             Err(KvError::VersionMismatch) => {
-                Response::new(Status::VersionMismatch, command.header.seq, Vec::new())
+                Response::new(Status::VersionMismatch, seq, Vec::new())
             }
-            _ => Response::error(command.header.seq),
+            _ => Response::error(seq),
         }
     }
 
-    fn handle_subscribe(&self, _command: Command) -> Response {
+    fn handle_subscribe(&self, _command: Command, seq: u32) -> Response {
         // TODO: Implement subscription logic
-        Response::error(_command.header.seq)
+        Response::error(seq)
     }
 
-    fn handle_unsubscribe(&self, _command: Command) -> Response {
+    fn handle_unsubscribe(&self, _command: Command, seq: u32) -> Response {
         // TODO: Implement unsubscription logic
-        Response::error(_command.header.seq)
+        Response::error(seq)
     }
 
-    fn handle_publish(&self, _command: Command) -> Response {
+    fn handle_publish(&self, _command: Command, seq: u32) -> Response {
         // TODO: Implement publish logic
-        Response::error(_command.header.seq)
+        Response::error(seq)
     }
 
-    fn handle_info(&self, command: Command) -> Response {
+    fn handle_info(&self, _command: Command, seq: u32) -> Response {
         let stats = self.get_stats();
         let info_json = serde_json::to_vec(&stats).unwrap_or_default();
-        Response::ok(command.header.seq, info_json)
+        Response::ok(seq, info_json)
     }
 
     /// Attach a new session
@@ -423,6 +435,11 @@ impl VedDb {
 
     fn header(&self) -> &VedDbHeader {
         unsafe { &*self.header }
+    }
+
+    /// Get raw KV store pointer (for server use)
+    pub fn kv_store_ptr(&self) -> *const crate::kv::KvStore {
+        self.kv_store
     }
 }
 

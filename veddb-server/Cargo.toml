@@ -1,8 +1,8 @@
 [package]
 name = "veddb-server"
-version = "0.1.0"
+version = "0.1.21"
 edition = "2021"
-description = "VedDB server with gRPC/QUIC endpoints and worker threads"
+description = "High-performance in-memory key-value database server with TCP protocol"
 
 [[bin]]
 name = "veddb-server"

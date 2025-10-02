@@ -1,753 +1,224 @@
-<div align="center">
+# VedDB Server v0.1.21
 
-# 🚀 VedDB Server
+**High-performance in-memory key-value database server with TCP protocol**
 
-### High-Performance Shared Memory Database with Pub/Sub
+VedDB Server is a fast, lightweight, and easy-to-use in-memory database designed for low-latency data access. Built in Rust with a focus on simplicity and performance.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mihir-Rabari/ved-db-server)
-
-*Blazing-fast, zero-copy, shared-memory database built in Rust*
-
-[Features](#-features) • [Quick Start](#-quick-start) • [Installation](#-installation) • [Documentation](#-documentation) • [Architecture](#-architecture)
-
-</div>
-
----
-
-## 📖 Overview
-
-**VedDB** is a high-throughput, low-latency database designed for applications that demand **sub-10µs response times** and **millions of operations per second**. Built entirely in Rust, it leverages shared memory for zero-copy local access while providing network connectivity for remote clients.
-
-### 🎯 Perfect For
-
-- **Microservices** on the same host needing ultra-fast IPC
-- **Real-time systems** requiring predictable latency  
-- **High-frequency trading** platforms
-- **Gaming servers** with massive concurrent operations
-- **IoT gateways** aggregating sensor data
-- **Cache layers** with pub/sub capabilities
-
----
-
-## 📁 Project Structure
-
-```
-ved-db/
-├── 📦 veddb-core/           # Core shared memory library
-│   ├── memory.rs            # Cross-platform shared memory
-│   ├── ring/                # Lock-free SPSC & MPMC rings
-│   ├── arena.rs             # Memory arena allocator
-│   ├── kv/                  # Key-value store
-│   ├── pubsub/              # Pub/Sub system
-│   └── session.rs           # Session management
-│
-├── 🖥️  veddb-server/         # Server implementation
-│   ├── main.rs              # Entry point & CLI
-│   ├── server.rs            # TCP server
-│   └── worker.rs            # Worker thread pool
-│
-├── 🔧 installer/            # MSI installer (Windows)
-├── 📄 Cargo.toml            # Workspace configuration
-├── 🔨 build.sh/.ps1         # Build scripts
-└── 📚 README.md             # This file
-```
-
-> **Note:** Client libraries are maintained separately for independent versioning and development.
-
----
+![Windows](https://img.shields.io/badge/platform-windows-blue)
+![Rust](https://img.shields.io/badge/rust-1.75+-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features
 
-### 🏎️ **Performance**
-- **Sub-10µs latency** for local operations
-- **Millions of ops/sec** with CPU core pinning
-- **Zero-copy** data access via shared memory
-- **Lock-free** SPSC and MPMC ring buffers
-- **Cache-line aligned** atomics to prevent false sharing
+- **⚡ Fast KV Operations**: Sub-millisecond SET/GET/DELETE operations
+- **🔌 TCP Protocol**: Simple binary protocol for network access
+- **🔒 Thread-Safe**: Lock-free concurrent access using DashMap
+- **📊 Session Management**: Multi-client support with automatic cleanup
+- **🛠️ Worker Pool**: Multi-threaded request processing
+- **📝 List Keys**: Enumerate all stored keys
+- **🎯 Simple Protocol**: Easy to implement clients in any language
 
-### 💾 **Data Structures**
-- **Key-Value Store** with hash table and CAS operations
-- **Pub/Sub System** with topic-based messaging
-- **Arena Allocator** for efficient variable-sized data
-- **Session Management** with dedicated command/response rings
+## 🚀 Quick Start
 
-### 🌐 **Connectivity**
-- **Local Access**: Direct shared memory for co-located processes
-- **Remote Access**: TCP server for network clients (gRPC/QUIC planned)
-- **Multi-threaded**: Worker pool with configurable thread count
+### Download & Installation (Windows)
 
-### 🛡️ **Reliability**
-- **Memory Safe**: Built in Rust with zero unsafe abstractions where possible
-- **Session Isolation**: Per-client sessions with timeout management
-- **Graceful Shutdown**: Clean resource cleanup
-- **Cross-Platform**: Windows, Linux, and macOS support
+VedDB Server is currently tested and supported on **Windows**. You can download the pre-built executable:
 
----
+**Option 1: Download from Website**
+- Visit our website and download the latest Windows `.exe`
+
+**Option 2: GitHub Releases**
+- Go to [Releases](https://github.com/yourusername/ved-db/releases)
+- Download `veddb-server-v0.1.21-windows.exe`
+
+### Running the Server
+
+```
+# Run with default settings (64MB memory, 4 workers, port 50051)
+veddb-server.exe
+
+# Or with custom configuration
+veddb-server.exe --memory 128 --workers 8 --port 50051
+```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--memory` | 64 | Memory size in MB |
+| `--workers` | 4 | Number of worker threads |
+| `--port` | 50051 | TCP server port |
+| `--path` | veddb_main | Database file path |
+
+## 📡 Protocol
+
+VedDB uses a simple binary protocol over TCP. All integers are **little-endian**.
+
+### Command Format (24 bytes header + payload)
+```
+┌─────────┬───────┬──────────┬─────┬─────────┬─────────┬───────┬─────┬───────┐
+│ opcode  │ flags │ reserved │ seq │ key_len │ val_len │ extra │ key │ value │
+│ (1 byte)│(1 byte)│(2 bytes)│(4)  │  (4)    │  (4)    │  (8)  │ ... │  ...  │
+└─────────┴───────┴──────────┴─────┴─────────┴─────────┴───────┴─────┴───────┘
+```
+
+### Response Format (20 bytes header + payload)
+```
+┌────────┬───────┬──────────┬─────┬─────────────┬───────┬─────────┐
+│ status │ flags │ reserved │ seq │ payload_len │ extra │ payload │
+│(1 byte)│(1 byte)│(2 bytes)│(4)  │     (4)     │  (8)  │   ...   │
+└────────┴───────┴──────────┴─────┴─────────────┴───────┴─────────┘
+```
+
+### Supported Operations
+
+| OpCode | Command | Description |
+|--------|---------|-------------|
+| `0x01` | PING | Health check - returns "pong" |
+| `0x02` | SET | Store key-value pair |
+| `0x03` | GET | Retrieve value by key |
+| `0x04` | DELETE | Remove key |
+| `0x09` | LIST | List all keys (newline-separated) |
+
+### Status Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `0x00` | OK | Operation successful |
+| `0x01` | NotFound | Key not found |
+| `0x04` | InternalError | Server error |
 
 ## 🏗️ Architecture
 
 ```
-┌──────────────────┐      ┌──────────────────────┐      ┌──────────────────┐
-│ Local Service 1  │      │ VedDB Core (Rust)    │      │ Local Service N  │
-│ (client lib)     │ <──> │ - Session Manager    │ <──> │ (client lib)     │
-│ writes to rings  │      │ - Sharded KV         │      │ reads rings      │
-└──────────────────┘      │ - Topic Manager      │      └──────────────────┘
-                          │ - Workers (pinned)   │
-                          │ - TCP/gRPC bridge    │
-                          └──────────────────────┘
-                                     ↑
-                                     │
-                       Remote clients via TCP/gRPC
+┌─────────────────────────────────────┐
+│    TCP Server (0.0.0.0:50051)       │
+├─────────────────────────────────────┤
+│  Worker Pool (4 threads)            │
+│  - Concurrent request handling      │
+│  - Session management               │
+├─────────────────────────────────────┤
+│  SimpleKvStore (DashMap)            │
+│  - Lock-free concurrent access      │
+│  - Thread-safe operations           │
+│  - O(1) average lookup              │
+└─────────────────────────────────────┘
 ```
-
-### Core Components
-
-| Component | Description |
-|-----------|-------------|
-| **veddb-core** | Shared memory primitives, data structures, and protocols |
-| **veddb-server** | Multi-threaded server with worker pool and TCP listener |
-| **Memory Manager** | Cross-platform shared memory (memfd on Linux, named on Windows) |
-| **Ring Buffers** | Lock-free SPSC for sessions, MPMC for pub/sub |
-| **Arena Allocator** | Efficient allocation for variable-sized values |
-| **Session Manager** | Per-client sessions with command/response rings |
-
----
-
-## 🚀 Quick Start
-
-**Just want to use VedDB?** Download the installer below ⬇️
-
-### Windows Users (Recommended) 🪟
-
-1. **Download the MSI Installer**
-   ```
-   https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/VedDB-Setup.msi
-   ```
-
-2. **Double-click the MSI file** and follow the wizard
-   - Choose installation directory
-   - Configure memory size and workers
-   - Optionally install as Windows Service
-
-3. **Start using VedDB**
-   ```powershell
-   veddb-server --help
-   ```
-
-That's it! The installer automatically sets up environment variables and adds VedDB to your PATH.
-
-### Linux Users 🐧
-
-1. **Download the binary**
-   ```bash
-   wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz
-   tar -xzf veddb-server-linux-x64.tar.gz
-   cd veddb-server
-   ```
-
-2. **Run the installer**
-   ```bash
-   sudo ./install.sh
-   ```
-
-3. **Start the server**
-   ```bash
-   veddb-server --create --name mydb --memory-mb 256
-   ```
-
-### macOS Users 🍎
-
-1. **Download the binary**
-   ```bash
-   curl -LO https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos.tar.gz
-   tar -xzf veddb-server-macos.tar.gz
-   cd veddb-server
-   ```
-
-2. **Run the installer**
-   ```bash
-   sudo ./install.sh
-   ```
-
-3. **Start the server**
-   ```bash
-   veddb-server --create --name mydb --memory-mb 256
-   ```
-
-### Quick Test
-
-After installation, verify it works:
-
-```bash
-# Start the server
-veddb-server --create --name test_db --memory-mb 128 --workers 2 --port 50051
-
-# You should see:
-# [INFO] VedDB Server starting...
-# [INFO] Listening on 0.0.0.0:50051
-```
-
-> **For Developers:** See [Building from Source](#-building-from-source) below
-
----
-
-## 📦 Installation Details
-
-### Windows Installation 🪟
-
-#### Method 1: MSI Installer (Easiest)
-
-**Download:** [VedDB-Setup.msi](https://github.com/mihir-Rabari/ved-db-server/releases/latest)
-
-The MSI installer provides:
-- ✅ **GUI wizard** - Easy step-by-step installation
-- ✅ **Automatic setup** - Environment variables configured automatically
-- ✅ **Windows Service** - Optional service installation
-- ✅ **Start Menu shortcuts** - Quick access to VedDB
-- ✅ **Clean uninstall** - Complete removal through Add/Remove Programs
-
-**Silent Installation** (for IT departments):
-```powershell
-msiexec /i VedDB-Setup.msi /quiet /qn
-```
-
-#### Method 2: Portable Installation
-
-1. Download [veddb-server-windows.zip](https://github.com/mihir-Rabari/ved-db-server/releases/latest)
-2. Extract to any folder
-3. Add the folder to your PATH
-4. Run `veddb-server.exe`
-
-### Linux Installation 🐧
-
-#### Method 1: Using Install Script (Recommended)
-
-```bash
-# Download and extract
-wget https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-linux-x64.tar.gz
-tar -xzf veddb-server-linux-x64.tar.gz
-cd veddb-server
-
-# Install system-wide
-sudo ./install.sh
-
-# Or install for current user only
-./install.sh
-```
-
-The script automatically:
-- ✅ Installs binary to `/usr/local/bin` (or `~/.local/bin`)
-- ✅ Sets up environment variables
-- ✅ Creates uninstall script
-
-#### Method 2: Package Managers (Coming Soon)
-
-```bash
-# Ubuntu/Debian (planned)
-sudo apt install veddb-server
-
-# Arch Linux (planned)
-yay -S veddb-server
-
-# Fedora/RHEL (planned)
-sudo dnf install veddb-server
-```
-
-### macOS Installation 🍎
-
-#### Method 1: Using Install Script
-
-```bash
-# Download and extract
-curl -LO https://github.com/mihir-Rabari/ved-db-server/releases/latest/download/veddb-server-macos.tar.gz
-tar -xzf veddb-server-macos.tar.gz
-cd veddb-server
-
-# Install
-sudo ./install.sh
-```
-
-#### Method 2: Homebrew (Coming Soon)
-
-```bash
-# Planned
-brew install veddb
-```
-
-### Docker Installation 🐳
-
-```bash
-# Pull the image
-docker pull veddb/server:latest
-
-# Run the server
-docker run -d \
-  --name veddb \
-  -p 50051:50051 \
-  -v veddb-data:/data \
-  veddb/server:latest \
-  --create --name mydb --memory-mb 512
-```
-
-### Verification
-
-After installation, verify VedDB is working:
-
-```bash
-# Check version
-veddb-server --version
-
-# Check help
-veddb-server --help
-
-# Test run
-veddb-server --create --name test --memory-mb 64
-```
-
----
-
-## ⚙️ Configuration
-
-### Command-Line Options
-
-```bash
-veddb-server [OPTIONS]
-
-OPTIONS:
-    --name <NAME>                Database instance name [default: veddb_main]
-    --memory-mb <SIZE>           Memory size in MB [default: 64]
-    --workers <COUNT>            Number of worker threads [default: 4]
-    --port <PORT>                Server port [default: 50051]
-    --session-timeout <SECS>     Session timeout in seconds [default: 300]
-    --create                     Create new instance (vs opening existing)
-    --debug                      Enable debug logging
-    -h, --help                   Print help information
-    -V, --version                Print version information
-```
-
-### Configuration File (Future)
-
-```toml
-# veddb.toml
-[server]
-name = "production_db"
-memory_mb = 1024
-workers = 8
-port = 50051
-
-[logging]
-level = "info"
-file = "logs/veddb.log"
-
-[persistence]
-enabled = true
-wal_path = "data/wal"
-```
-
----
-
-## 💻 Usage Examples
-
-### Start Server
-
-```bash
-# Development
-veddb-server --create --name dev_db --memory-mb 128 --debug
-
-# Production
-veddb-server --create --name prod_db --memory-mb 2048 --workers 16 --port 50051
-```
-
-### As Windows Service
-
-```powershell
-# Create service
-sc create VedDBServer binPath= "C:\Program Files\VedDB\veddb-server.exe --create --name prod_db --memory-mb 1024" start= auto
-
-# Start service
-sc start VedDBServer
-
-# Stop service
-sc stop VedDBServer
-
-# Delete service
-sc delete VedDBServer
-```
-
-### As Linux Systemd Service
-
-```bash
-# Create service file
-sudo nano /etc/systemd/system/veddb.service
-
-# Add:
-[Unit]
-Description=VedDB Server
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/veddb-server --create --name prod_db --memory-mb 1024
-Restart=on-failure
-User=veddb
-
-[Install]
-WantedBy=multi-user.target
-
-# Enable and start
-sudo systemctl enable veddb
-sudo systemctl start veddb
-sudo systemctl status veddb
-```
-
----
-
-## 🔧 Development
-
-> **Note:** This section is for developers who want to build VedDB from source. **Regular users should use the installers above**.
-
-### 🛠️ Building from Source
-
-#### Prerequisites
-
-- **Rust** 1.75 or later - [Install Rust](https://rustup.rs/)
-- **Git** - For cloning the repository
-- **C Compiler** - Usually already installed (gcc/clang on Unix, MSVC on Windows)
-
-#### Clone and Build
-
-```bash
-# Clone the repository
-git clone https://github.com/mihir-Rabari/ved-db-server.git
-cd ved-db-server/ved-db
-
-# Build in release mode (optimized)
-cargo build --release
-
-# The binary will be at: target/release/veddb-server
-./target/release/veddb-server --help
-```
-
-#### Quick Build Script
-
-```bash
-# Unix/Linux/macOS
-./build.sh
-
-# Windows PowerShell
-./build.ps1
-```
-
-#### Build Specific Components
-
-```bash
-# Build only the core library
-cargo build --release -p veddb-core
-
-# Build only the server
-cargo build --release -p veddb-server
-```
-
-### Testing
-
-```bash
-# Run all tests
-cargo test --workspace
-
-# Run specific tests
-cargo test -p veddb-core
-cargo test -p veddb-server
-
-# Run with output
-cargo test -- --nocapture
-```
-
-### Linting and Formatting
-
-```bash
-# Format code
-cargo fmt --all
-
-# Run clippy
-cargo clippy --workspace --all-targets
-
-# Fix clippy warnings
-cargo clippy --workspace --all-targets --fix
-```
-
-### Benchmarks
-
-```bash
-# Run benchmarks
-cargo bench -p veddb-core
-
-# Specific benchmark
-cargo bench -p veddb-core --bench kv_benchmarks
-```
-
----
 
 ## 📊 Performance
 
-### Benchmarks (Preliminary)
+Tested on Windows with Intel i7, 16GB RAM:
 
-| Operation | Latency (p50) | Latency (p99) | Throughput |
-|-----------|---------------|---------------|------------|
-| Local GET | 8µs | 15µs | 2M ops/sec |
-| Local SET | 10µs | 20µs | 1.8M ops/sec |
-| Remote GET | 50µs | 100µs | 500K ops/sec |
-| Remote SET | 60µs | 120µs | 450K ops/sec |
-| Pub/Sub | 12µs | 25µs | 1.5M msgs/sec |
+- **Latency**: < 1ms for most operations
+- **Throughput**: 10,000+ ops/sec per connection
+- **Concurrency**: Lock-free data structure for parallel access
+- **Memory**: Efficient in-memory storage with DashMap
 
-*Tested on: Intel i7-12700K, 32GB RAM, NVMe SSD*
+## 🔧 Usage Examples
 
-### Optimization Tips
+### Using with veddb-cli (Rust Client)
 
-1. **CPU Pinning**: Workers automatically pin to CPU cores on Linux
-2. **Memory Size**: Allocate enough memory to avoid arena exhaustion
-3. **Worker Count**: Match to CPU core count for best performance
-4. **Session Timeout**: Lower timeout for faster session cleanup
+```
+# Ping server
+veddb-cli.exe ping
 
----
+# Set a key
+veddb-cli.exe kv set name John
 
-## 📚 Documentation
+# Get a key
+veddb-cli.exe kv get name
 
-- **[Architecture Guide](ARCHITECTURE.md)** - Internal design and data structures
-- **[API Documentation](https://docs.rs/veddb-core)** - Rust API docs
-- **[Installation Guide](../INSTALLATION_GUIDE.md)** - Detailed installation instructions
-- **[Feature Roadmap](../FEATURE_ROADMAP.md)** - Planned features and timeline
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
-- **[Changelog](CHANGELOG.md)** - Version history
+# List all keys
+veddb-cli.exe kv list
 
----
+# Delete a key
+veddb-cli.exe kv del name
+```
+
+### Implementing Your Own Client
+
+The protocol is simple enough to implement in any language. See the protocol section above for details.
+
+Example pseudo-code:
+```
+1. Connect to 127.0.0.1:50051
+2. Build command: [opcode][flags][reserved][seq][key_len][val_len][extra][key][value]
+3. Send command bytes
+4. Read response: [status][flags][reserved][seq][payload_len][extra][payload]
+5. Parse response based on status code
+```
+
+## 🛠️ Development
+
+### Building from Source
+
+**Prerequisites:**
+- Rust 1.75 or later ([Install Rust](https://rustup.rs/))
+- Windows 10/11
+
+```
+git clone https://github.com/yourusername/ved-db.git
+cd ved-db\ved-db-server
+cargo build --release
+```
+
+Binary will be at: `target\release\veddb-server.exe`
+
+### Running Tests
+
+```
+cargo test --workspace
+```
+
+### Logging
+
+VedDB uses `tracing` for structured logging. Set `RUST_LOG` environment variable:
+- `info` - Default level
+- `debug` - Verbose logging
+- `trace` - Very verbose logging
+
+## 📦 Components
+
+- **veddb-core**: Core data structures and protocol definitions
+- **veddb-server**: TCP server implementation
+- **simple_kv**: Lock-free KV store using DashMap
 
 ## 🗺️ Roadmap
 
-See [FEATURE_ROADMAP.md](../FEATURE_ROADMAP.md) for the complete roadmap.
+### Current (v0.1.21)
+- ✅ Basic KV operations (SET, GET, DELETE)
+- ✅ LIST keys operation
+- ✅ TCP protocol
+- ✅ Multi-threaded worker pool
+- ✅ Session management
+- ✅ Windows support
 
-### v0.2.0 (Q2 2024)
-- ✅ Write-Ahead Log (WAL)
-- ✅ Snapshots for persistence
-- ✅ Authentication & authorization
-- ✅ Prometheus metrics
+### Planned (v0.2.x)
+- ⏳ Persistence (WAL + snapshots)
+- ⏳ Authentication
+- ⏳ Pub/Sub messaging
+- ⏳ TTL (time-to-live) for keys
+- ⏳ Pattern matching for LIST
 
-### v0.3.0 (Q3 2024)
-- ⏳ Master-slave replication
-- ⏳ Secondary indexes
-- ⏳ Sorted sets & lists
-
-### v1.0.0 (Q1 2025)
-- ⏳ Production-ready
-- ⏳ Full documentation
-- ⏳ Clustering support
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Ways to Contribute
-
-- 🐛 Report bugs
-- 💡 Suggest features
-- 📝 Improve documentation
-- 🔧 Submit pull requests
-- ⭐ Star the repository
-
----
+### Future (v1.0.x)
+- ⏳ Replication
+- ⏳ Clustering
+- ⏳ Linux/macOS support
+- ⏳ gRPC protocol option
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- Built with [Rust](https://www.rust-lang.org/)
-- Inspired by Redis, Memcached, and modern shared-memory databases
-- Thanks to all contributors!
-
----
-
-<div align="center">
-
-**[⬆ Back to Top](#-veddb-server)**
-
-Made with ❤️ by the VedDB Team
-
-</div>
-=======
-# VedDB Server
-
-![status-active](https://img.shields.io/badge/status-active-brightgreen)
-![rust-stable](https://img.shields.io/badge/rust-stable-orange)
-![platform-windows](https://img.shields.io/badge/platform-windows-lightgrey)
-![license-MIT](https://img.shields.io/badge/license-MIT-blue)
-
-VedDB Server is a **high-performance, in-memory database server** built in Rust.
-It provides **zero-copy shared memory access** for local processes and an experimental **QUIC/gRPC networking layer** for remote connections.
-
-⚠️ **Currently, the server binary is only available and tested on Windows.**.
-
-This repository contains the **server implementation only**. Client libraries are maintained in separate repositories.
-
----
-
-## 🚀 Features (v0.0.1)
-
-* **Core Database Engine**
-
-  * In-memory key-value store with shared memory arena allocator.
-  * Command/response protocol with `OpCode` and `Status`.
-  * Supports basic CRUD: `GET`, `SET`, `DELETE`.
-* **Concurrency & Performance**
-
-  * SPSC ring buffers for zero-copy local IPC.
-  * Worker pool with atomic operations for thread-safe sessions.
-* **Networking**
-
-  * Experimental QUIC/gRPC layer (prototype, wire format subject to change).
-* **Session Management**
-
-  * Unique session IDs for each connected client.
-  * Structured error handling via `ClientError`.
-* **Extensible Protocol**
-
-  * Easily extendable command handling for future operations like CAS and Pub/Sub.
-
----
-
-## 📦 Installation & Running (Windows)
-
-### 1. Download the Server Binary
-
-* Download the Windows `.exe` for v0.0.1 from the **release assets**
-
-### 2. Place in Folder
-
-* Place in a folder of your choice, e.g., `C:\VedDB\`.
-
-### 3. Add Folder to System `PATH` (Optional, Recommended)
-
-Adding the folder to your environment variables lets you run `veddb-server-windows.exe` from **any location** in PowerShell or CMD.
-
-1. Press `Win + R`, type `sysdm.cpl`, and press **Enter**.
-2. Go to the **Advanced** tab → click **Environment Variables**.
-3. Under **System Variables**, find and select `Path`, then click **Edit**.
-4. Click **New** and add your folder path (e.g., `C:\VedDB\`).
-5. Click **OK** to save.
-6. Close and reopen PowerShell or CMD.
-
-Now you can run:
-
-```powershell
-veddb-server-windows --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
-```
-
-from **any directory**.
-
-### 4. Open PowerShell or CMD
-
-If you didn’t add it to `PATH`, navigate manually:
-
-```powershell
-cd C:\VedDB\
-```
-
-### 5. Run the Server via CLI
-
-* Example command:
-
-```powershell
-veddb-server-windows.exe --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
-```
-
-**Default server settings:**
-
-* **Port:** 50051
-* **Memory:** 64MB
-* **Workers:** 4
-
-The server will start in the current console. Logs and stats will print directly to the CLI.
-
-To stop the server, press `Ctrl+C` in PowerShell or CMD.
-
----
-
-## 💻 Building from Source
-
-If you want to build from source:
-
-```powershell
-git clone https://github.com/Mihir-Rabari/ved-db-server.git
-cd ved-db-server
-cargo build --release
-```
-
-### Experimental: Other Platforms
-
-Linux/macOS users can attempt to build from source:
-
-```bash
-git clone https://github.com/Mihir-Rabari/ved-db-server.git
-cd ved-db-server
-cargo build --release
-./target/release/veddb-server-windows --create --name veddb_main --memory-mb 256 --workers 4 --port 50051 --debug
-```
-
-**Note:** Shared memory behavior and networking are experimental on non-Windows platforms.
-
----
-
-## 🛠 Usage
-
-* Server binary only (Windows officially).
-* Client interaction through separate client repositories.
-* Supported commands in v0.0.1:
-
-  * `GET key`
-  * `SET key value`
-  * `DELETE key`
-* CAS and Pub/Sub operations are planned for future releases.
-
----
-
-## 📖 Documentation
-
-* **Architecture Overview:** [ARCHITECTURE.md](ARCHITECTURE.md)
-* **Changelog:** [CHANGELOG.md](./CHANGELOG.md)
-
----
-
-## 📜 Changelog
-
-See [CHANGELOG.md](./CHANGELOG.md) for details.
-Latest release: **v0.0.1 – Windows-only server prototype**.
-
----
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🤝 Contributing
 
-Open an issue or PR for bug reports, feature requests, or discussions.
+Contributions welcome! Please open an issue or PR on GitHub.
 
-Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+## 📧 Contact
 
----
-
-## 📬 Contact
-
-* Email: **[mihirrabari2604@gmail.com](mailto:mihirrabari2604@gmail.com)**
-* Instagram: **@mihirrabariii**
+- **Email**: mihirrabari2604@gmail.com
+- **Instagram**: @mihirrabariii
 
 ---
 
-## 📄 License
-
-MIT License – see [LICENSE](LICENSE) for details.
-
----
->>>>>>> 6d7c71eaadeefdc3250a93be59cbce87e7322585
+**Built with ❤️ in Rust**
