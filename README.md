@@ -28,7 +28,7 @@ VedDB Server is currently tested and supported on **Windows**. You can download 
 - Visit our website and download the latest Windows `.exe`
 
 **Option 2: GitHub Releases**
-- Go to [Releases](https://github.com/yourusername/ved-db/releases)
+- Go to [Releases](https://github.com/Mihir-Rabari/ved-db-server/releases)
 - Download `veddb-server-v0.1.21-windows.exe`
 
 ### Running the Server
@@ -157,8 +157,8 @@ Example pseudo-code:
 - Windows 10/11
 
 ```
-git clone https://github.com/yourusername/ved-db.git
-cd ved-db\ved-db-server
+git clone https://github.com/Mihir-Rabari/ved-db-server.git
+cd ved-db-server
 cargo build --release
 ```
 
