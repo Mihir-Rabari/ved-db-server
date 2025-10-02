@@ -19,7 +19,6 @@ VedDB Server is a fast, lightweight, and easy-to-use in-memory database designed
 - **🎯 Simple Protocol**: Easy to implement clients in any language
 
 ## 🚀 Quick Start
-
 VedDB Server is currently tested and supported on **Windows**. You can download the pre-built executable:
 
 **Option 1: Download from Website**
@@ -29,16 +28,21 @@ VedDB Server is currently tested and supported on **Windows**. You can download 
 - Go to [Releases](https://github.com/Mihir-Rabari/ved-db-server/releases)
 - Download `veddb-server-v0.1.21-windows.exe`
 
+**Option 3: Official Client**
+- **Rust Client + CLI**: [ved-db-rust-client v0.0.12](https://github.com/Mihir-Rabari/ved-db-rust-client)
+  - 📦 [Crates.io](https://crates.io/crates/veddb-client) - `cargo add veddb-client`
+  - 📚 [Documentation](https://docs.rs/veddb-client) - API docs
+  - 🖥️ Includes both Rust library and CLI tool (`veddb-cli.exe`)
+
 ### Running the Server
 
 # Or with custom configuration
 veddb-server.exe --memory 128 --workers 8 --port 50051
-```
 
 ### Configuration Options
 
 | Option | Default | Description |
-|--------|---------|-------------|
+{{ ... }}
 | `--memory` | 64 | Memory size in MB |
 | `--workers` | 4 | Number of worker threads |
 | `--port` | 50051 | TCP server port |
