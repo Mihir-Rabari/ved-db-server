@@ -21,7 +21,7 @@ thiserror = "1.0"
 
 # Shared memory and system
 memmap2 = "0.9"
-nix = { version = "0.27", features = ["event", "fs", "memfd"] }
+nix = { version = "0.27", features = ["event", "fs"] }
 libc = "0.2"
 
 # Concurrency and atomics
