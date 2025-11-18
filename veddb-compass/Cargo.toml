@@ -1,0 +1,21 @@
+[package]
+name = "veddb-compass"
+version = "0.2.0"
+edition = "2021"
+description = "Desktop GUI application for VedDB database management"
+authors = ["VedDB Team"]
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
