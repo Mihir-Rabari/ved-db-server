@@ -18,6 +18,7 @@ pub mod ring;
 pub mod schema;
 pub mod session;
 pub mod simple_kv;
+pub mod snapshot;
 pub mod storage;
 pub mod wal;
 
