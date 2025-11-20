@@ -9,7 +9,9 @@
 pub mod entry;
 pub mod writer;
 pub mod reader;
+pub mod replay;
 
 pub use entry::*;
 pub use writer::*;
 pub use reader::*;
+pub use replay::*;
