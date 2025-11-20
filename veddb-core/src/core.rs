@@ -163,6 +163,9 @@ impl VedDb {
         std::ptr::write(header, VedDbHeader::new(config.clone()));
         offset += std::mem::size_of::<VedDbHeader>();
 
+        // Align offset to 64 bytes for arena (required for SpscRing alignment)
+        offset = (offset + 63) & !63;
+
         // Calculate component sizes
         let arena_size = config.memory_size / 2; // Use half for arena
         let kv_size = KvStore::size_for_config(&config.kv_config);

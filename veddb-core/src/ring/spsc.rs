@@ -183,9 +183,18 @@ impl SpscRingBuffer {
         assert!(capacity.is_power_of_two(), "Capacity must be power of 2");
 
         let size = SpscRing::size_for_capacity(capacity);
-        let mut memory = vec![0u8; size];
+        // Allocate with 64-byte alignment for SpscRing
+        let layout = std::alloc::Layout::from_size_align(size, 64).unwrap();
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        
+        if ptr.is_null() {
+            panic!("Failed to allocate memory for SpscRingBuffer");
+        }
 
-        let ring = unsafe { SpscRing::init(memory.as_mut_ptr(), capacity) };
+        let ring = unsafe { SpscRing::init(ptr, capacity) };
+
+        // Create a Vec from the raw parts to manage the memory
+        let memory = unsafe { Vec::from_raw_parts(ptr, size, size) };
 
         Self { memory, ring }
     }
@@ -193,6 +202,20 @@ impl SpscRingBuffer {
     /// Get reference to the ring
     pub fn ring(&self) -> &SpscRing {
         unsafe { &*self.ring }
+    }
+}
+
+impl Drop for SpscRingBuffer {
+    fn drop(&mut self) {
+        // Deallocate with the correct layout
+        let size = self.memory.len();
+        let layout = std::alloc::Layout::from_size_align(size, 64).unwrap();
+        unsafe {
+            let ptr = self.memory.as_mut_ptr();
+            // Prevent Vec from trying to deallocate
+            std::mem::forget(std::mem::take(&mut self.memory));
+            std::alloc::dealloc(ptr, layout);
+        }
     }
 }
 

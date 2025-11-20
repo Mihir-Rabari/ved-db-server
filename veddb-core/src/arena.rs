@@ -117,22 +117,20 @@ impl Arena {
             return 0;
         }
 
-        let aligned_size = (size + align - 1) & !(align - 1);
-
         // Try to allocate from free list first
-        if let Some(offset) = self.allocate_from_free_list(aligned_size) {
+        if let Some(offset) = self.allocate_from_free_list(size, align) {
             self.allocation_count.fetch_add(1, Ordering::Relaxed);
             self.allocated_bytes
-                .fetch_add(aligned_size as u64, Ordering::Relaxed);
+                .fetch_add(size as u64, Ordering::Relaxed);
             return offset;
         }
 
         // Fall back to bump allocation
-        self.bump_allocate(aligned_size, align)
+        self.bump_allocate(size, align)
     }
 
     /// Try to allocate from appropriate free list
-    fn allocate_from_free_list(&self, size: usize) -> Option<u64> {
+    fn allocate_from_free_list(&self, size: usize, align: usize) -> Option<u64> {
         let class_idx = Self::size_class_for(size)?;
         let class_size = Self::size_for_class(class_idx);
 
@@ -146,6 +144,11 @@ impl Arena {
             let head_offset = self.free_lists[class_idx].load(Ordering::Acquire);
             if head_offset == 0 {
                 return None; // Free list is empty
+            }
+
+            // Check if the offset meets alignment requirements
+            if head_offset % (align as u64) != 0 {
+                return None; // Offset not properly aligned, use bump allocator instead
             }
 
             unsafe {
