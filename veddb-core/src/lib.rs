@@ -19,6 +19,7 @@ pub mod schema;
 pub mod session;
 pub mod simple_kv;
 pub mod storage;
+pub mod wal;
 
 pub use arena::*;
 pub use cache::*;
