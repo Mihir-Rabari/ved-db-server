@@ -26,6 +26,7 @@ rand = "0.8"
 log = "0.4"
 bcrypt.workspace = true
 jsonwebtoken.workspace = true
+aes-gcm.workspace = true
 
 # RocksDB is optional and requires LLVM/Clang on Windows
 # Install LLVM from https://releases.llvm.org/ and set LIBCLANG_PATH
