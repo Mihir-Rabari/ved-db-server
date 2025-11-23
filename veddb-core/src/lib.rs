@@ -7,13 +7,16 @@
 //! - Command protocol definitions
 
 pub mod arena;
+pub mod auth;
 pub mod cache;
 pub mod core;
 pub mod document;
+pub mod index;
 pub mod kv;
 pub mod memory;
 pub mod protocol;
 pub mod pubsub;
+pub mod query;
 pub mod ring;
 pub mod schema;
 pub mod session;
@@ -23,11 +26,14 @@ pub mod storage;
 pub mod wal;
 
 pub use arena::*;
+pub use auth::*;
 pub use cache::*;
 pub use core::*;
 pub use document::*;
+pub use index::*;
 pub use memory::*;
 pub use protocol::*;
+pub use query::*;
 pub use ring::*;
 pub use schema::*;
 pub use simple_kv::SimpleKvStore;

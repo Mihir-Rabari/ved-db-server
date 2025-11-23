@@ -23,6 +23,9 @@ crc32fast.workspace = true
 sha2.workspace = true
 hex = "0.4"
 rand = "0.8"
+log = "0.4"
+bcrypt.workspace = true
+jsonwebtoken.workspace = true
 
 # RocksDB is optional and requires LLVM/Clang on Windows
 # Install LLVM from https://releases.llvm.org/ and set LIBCLANG_PATH
