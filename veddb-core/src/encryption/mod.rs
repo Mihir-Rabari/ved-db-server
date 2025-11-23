@@ -8,9 +8,11 @@
 
 pub mod key_manager;
 pub mod document_encryption;
+pub mod key_rotation;
 
 pub use key_manager::*;
 pub use document_encryption::*;
+pub use key_rotation::*;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,7 @@ pub struct EncryptionEngine {
     config: EncryptionConfig,
     key_manager: KeyManager,
     document_encryption: DocumentEncryption,
+    key_rotation_scheduler: Option<KeyRotationScheduler>,
 }
 
 impl EncryptionEngine {
@@ -82,7 +85,61 @@ impl EncryptionEngine {
             config,
             key_manager,
             document_encryption,
+            key_rotation_scheduler: None,
         })
+    }
+
+    /// Enable automatic key rotation
+    pub fn enable_key_rotation(&mut self, rotation_config: KeyRotationConfig) -> Result<()> {
+        let scheduler = KeyRotationScheduler::new(rotation_config);
+        self.key_rotation_scheduler = Some(scheduler);
+        log::info!("Enabled automatic key rotation");
+        Ok(())
+    }
+
+    /// Disable automatic key rotation
+    pub fn disable_key_rotation(&mut self) {
+        self.key_rotation_scheduler = None;
+        log::info!("Disabled automatic key rotation");
+    }
+
+    /// Start key rotation scheduler (if enabled)
+    /// Note: This method is intended for background task spawning
+    pub fn has_key_rotation_enabled(&self) -> bool {
+        self.key_rotation_scheduler.is_some()
+    }
+
+    /// Manually rotate a specific key
+    pub async fn rotate_key(&mut self, key_id: &str) -> Result<()> {
+        // Always do direct rotation to avoid borrowing conflicts
+        // The scheduler can call this method when needed
+        self.key_manager.rotate_key(key_id)?;
+        log::info!("Manually rotated key: {}", key_id);
+        Ok(())
+    }
+
+    /// Perform scheduled key rotation check
+    pub async fn check_and_rotate_keys(&mut self) -> Result<()> {
+        if let Some(scheduler) = self.key_rotation_scheduler.take() {
+            let mut temp_scheduler = scheduler;
+            temp_scheduler.check_and_rotate_keys(self).await?;
+            self.key_rotation_scheduler = Some(temp_scheduler);
+        }
+        Ok(())
+    }
+
+    /// Get key rotation status
+    pub fn get_rotation_status(&self, key_id: &str) -> Option<&KeyRotationStatus> {
+        self.key_rotation_scheduler
+            .as_ref()
+            .and_then(|scheduler| scheduler.get_rotation_status(key_id))
+    }
+
+    /// Get rotation statistics
+    pub fn get_rotation_statistics(&self) -> Option<RotationStatistics> {
+        self.key_rotation_scheduler
+            .as_ref()
+            .map(|scheduler| scheduler.get_rotation_statistics())
     }
 
     /// Check if encryption is enabled
@@ -307,5 +364,60 @@ mod tests {
         let original_data = b"This should not be encrypted";
         let result = engine.encrypt_document("test_collection", original_data).unwrap();
         assert_eq!(result, original_data);
+    }
+
+    #[tokio::test]
+    async fn test_key_rotation_integration() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        
+        let mut engine = EncryptionEngine::new(config, temp_dir.path().to_str().unwrap()).unwrap();
+        
+        // Enable key rotation
+        let rotation_config = KeyRotationConfig {
+            enabled: true,
+            rotation_interval_days: 1,
+            max_old_keys: 3,
+            reencryption_batch_size: 100,
+            reencryption_delay_ms: 10,
+        };
+        
+        engine.enable_key_rotation(rotation_config).unwrap();
+        assert!(engine.has_key_rotation_enabled());
+        
+        // Create a key
+        engine.key_manager_mut().create_key("test_rotation_key").unwrap();
+        let original_key = engine.key_manager().get_key("test_rotation_key").unwrap();
+        
+        // Rotate the key
+        engine.rotate_key("test_rotation_key").await.unwrap();
+        
+        // Verify key was rotated
+        let new_key = engine.key_manager().get_key("test_rotation_key").unwrap();
+        assert_ne!(original_key, new_key);
+    }
+
+    #[test]
+    fn test_key_rotation_enable_disable() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        
+        let mut engine = EncryptionEngine::new(config, temp_dir.path().to_str().unwrap()).unwrap();
+        
+        // Initially no rotation scheduler
+        assert!(engine.get_rotation_statistics().is_none());
+        
+        // Enable key rotation
+        let rotation_config = KeyRotationConfig::default();
+        engine.enable_key_rotation(rotation_config).unwrap();
+        
+        // Should now have rotation scheduler
+        assert!(engine.get_rotation_statistics().is_some());
+        
+        // Disable key rotation
+        engine.disable_key_rotation();
+        
+        // Should no longer have rotation scheduler
+        assert!(engine.get_rotation_statistics().is_none());
     }
 }
