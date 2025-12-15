@@ -8,7 +8,7 @@ use crate::{
     kv::{KvConfig, KvError, KvStore},
     memory::SharedMemory,
     protocol::{Command, OpCode, Response, Status},
-    pubsub::{PubSubConfig, PubSubError, TopicRegistry},
+    pubsub::{PubSubConfig, PubSubError, PubSubSystem},
     ring::Slot,
     session::{SessionError, SessionId, SessionManager, SessionRegistry},
 };
@@ -64,8 +64,6 @@ pub struct VedDbHeader {
     pub kv_store_size: u64,
     pub session_registry_offset: u64,
     pub session_registry_size: u64,
-    pub topic_registry_offset: u64,
-    pub topic_registry_size: u64,
 
     /// Configuration
     pub config: VedDbConfig,
@@ -99,8 +97,6 @@ impl VedDbHeader {
             kv_store_size: 0,
             session_registry_offset: 0,
             session_registry_size: 0,
-            topic_registry_offset: 0,
-            topic_registry_size: 0,
             config,
             total_operations: AtomicU64::new(0),
             uptime_start: now,
@@ -131,7 +127,7 @@ pub struct VedDb {
     arena: *mut Arena,
     kv_store: *mut KvStore,
     session_manager: SessionManager,
-    topic_registry: *mut TopicRegistry,
+    pubsub_system: PubSubSystem,
 }
 
 impl VedDb {
@@ -170,7 +166,6 @@ impl VedDb {
         let arena_size = config.memory_size / 2; // Use half for arena
         let kv_size = KvStore::size_for_config(&config.kv_config);
         let session_size = SessionRegistry::size_for_max_sessions(config.max_sessions);
-        let topic_size = TopicRegistry::size_for_max_topics(config.pubsub_config.max_topics);
 
         // Initialize arena
         let arena_ptr = base_ptr.add(offset);
@@ -191,17 +186,13 @@ impl VedDb {
         let session_registry = SessionRegistry::init(session_ptr, config.max_sessions);
         (*header).session_registry_offset = offset as u64;
         (*header).session_registry_size = session_size as u64;
-        offset += session_size;
-
-        // Initialize topic registry
-        let topic_ptr = base_ptr.add(offset);
-        let topic_registry = TopicRegistry::init(topic_ptr, config.pubsub_config.max_topics);
-        (*header).topic_registry_offset = offset as u64;
-        (*header).topic_registry_size = topic_size as u64;
 
         // Create session manager
         let session_manager =
             SessionManager::new(session_registry, arena, config.session_ring_capacity);
+
+        // Create pub/sub system
+        let pubsub_system = PubSubSystem::new(config.pubsub_config.clone());
 
         Ok(Self {
             shared_memory,
@@ -209,7 +200,7 @@ impl VedDb {
             arena,
             kv_store,
             session_manager,
-            topic_registry,
+            pubsub_system,
         })
     }
 
@@ -227,8 +218,6 @@ impl VedDb {
         let kv_store = base_ptr.add((*header).kv_store_offset as usize) as *mut KvStore;
         let session_registry =
             base_ptr.add((*header).session_registry_offset as usize) as *mut SessionRegistry;
-        let topic_registry =
-            base_ptr.add((*header).topic_registry_offset as usize) as *mut TopicRegistry;
 
         let session_manager = SessionManager::new(
             session_registry,
@@ -236,13 +225,16 @@ impl VedDb {
             (*header).config.session_ring_capacity,
         );
 
+        // Create pub/sub system
+        let pubsub_system = PubSubSystem::new((*header).config.pubsub_config.clone());
+
         Ok(Self {
             shared_memory,
             header,
             arena,
             kv_store,
             session_manager,
-            topic_registry,
+            pubsub_system,
         })
     }
 
@@ -313,13 +305,14 @@ impl VedDb {
 
     fn handle_cas(&self, command: Command, seq: u32) -> Response {
         let kv_store = unsafe { &*self.kv_store };
-        let expected_version = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(command.header.extra)) };
+        // Note: v0.2.0 stores expected_version in payload instead of header
+        let expected_version = 0; // TODO: Parse from payload
 
         match kv_store.cas(&command.key, expected_version, &command.value) {
             Ok(new_version) => {
-                let mut resp = Response::ok(seq, Vec::new());
-                resp.header.extra = new_version;
-                resp
+                // Note: v0.2.0 returns new_version in payload instead of header
+                let payload = new_version.to_le_bytes().to_vec();
+                Response::ok(seq, payload)
             }
             Err(KvError::NotFound) => Response::not_found(seq),
             Err(KvError::VersionMismatch) => {
@@ -405,8 +398,9 @@ impl VedDb {
         // Active sessions via session manager
         let active_sessions = self.get_active_sessions().len() as u64;
 
-        // Topic registry stats
-        let active_topics = unsafe { &*self.topic_registry }.stats().active_topics;
+        // Pub/sub stats
+        let pubsub_stats = self.pubsub_system.get_stats();
+        let active_channels = pubsub_stats.total_channels;
 
         VedDbStats {
             uptime_secs,
@@ -416,7 +410,7 @@ impl VedDb {
             kv_operations: kv_stats.total_operations,
             kv_keys: kv_stats.total_keys,
             active_sessions,
-            active_topics,
+            active_channels,
         }
     }
 
@@ -459,7 +453,7 @@ pub struct VedDbStats {
     pub kv_operations: u64,
     pub kv_keys: u64,
     pub active_sessions: u64,
-    pub active_topics: u64,
+    pub active_channels: u64,
 }
 
 /// VedDB errors

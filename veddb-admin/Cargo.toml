@@ -1,0 +1,50 @@
+[package]
+name = "veddb-admin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "veddb-admin"
+path = "src/main.rs"
+
+[dependencies]
+# Core dependencies
+veddb-core = { path = "../veddb-core" }
+
+# CLI framework
+clap.workspace = true
+
+# Async runtime
+tokio = { workspace = true, features = ["fs"] }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Networking
+tonic.workspace = true
+
+# Utilities
+chrono.workspace = true
+uuid.workspace = true
+
+# Configuration
+toml.workspace = true
+config.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Cryptography (for authentication)
+jsonwebtoken.workspace = true
+
+# Password input
+rpassword = "7.3"

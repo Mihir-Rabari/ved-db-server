@@ -1,54 +1,47 @@
-//! VedDB Server - High-performance shared memory KV store with Pub/Sub
+//! VedDB Server v0.2.0 - High-performance document database
 //!
-//! Main server process that manages worker threads, handles client sessions,
-//! and provides gRPC endpoints for remote access.
+//! Main server process providing TCP protocol access to VedDB's
+//! document storage, caching, and query capabilities.
 
 use anyhow::Result;
 use clap::Parser;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::signal;
-use tracing::{error, info, warn};
+use tokio::sync::RwLock;
+use tracing::info;
 use tracing_subscriber::EnvFilter;
-use veddb_core::{VedDb, VedDbConfig};
-
-mod server;
-mod worker;
-
-use server::VedDbServer;
-use worker::WorkerPool;
+use veddb_core::{
+    AuthSystem, JwtService,
+    CacheConfig, PersistentLayer, HybridStorageEngine,
+    ConnectionManager,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "veddb-server")]
-#[command(about = "VedDB - High-performance shared memory KV store + Pub/Sub")]
+#[command(about = "VedDB v0.2.0 - High-performance document database")]
+#[command(version = "0.2.0")]
 struct Args {
-    /// Shared memory name/identifier
-    #[arg(short, long, default_value = "veddb_main")]
-    name: String,
+    /// Data directory path
+    #[arg(short = 'D', long, default_value = "./veddb_data")]
+    data_dir: PathBuf,
 
-    /// Memory size in MB
-    #[arg(short, long, default_value = "64")]
-    memory_mb: usize,
+    /// TCP server bind address
+    #[arg(short = 'H', long, default_value = "0.0.0.0")]
+    host: String,
 
-    /// Number of worker threads
-    #[arg(short, long, default_value = "4")]
-    workers: usize,
-
-    /// gRPC server port
-    #[arg(short, long, default_value = "50051")]
+    /// TCP server port
+    #[arg(short = 'p', long, default_value = "50051")]
     port: u16,
 
-    /// Session timeout in seconds
-    #[arg(short, long, default_value = "300")]
-    session_timeout: u64,
+    /// Cache size in MB
+    #[arg(short = 'c', long, default_value = "256")]
+    cache_size_mb: usize,
 
     /// Enable debug logging
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     debug: bool,
-
-    /// Create new instance (vs opening existing)
-    #[arg(long)]
-    create: bool,
 }
 
 #[tokio::main]
@@ -61,116 +54,112 @@ async fn main() -> Result<()> {
         "veddb_server={},veddb_core={}",
         log_level, log_level
     ));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
 
-    info!("Starting VedDB Server");
-    info!(
-        "Memory: {}MB, Workers: {}, Port: {}",
-        args.memory_mb, args.workers, args.port
+    info!("╔═══════════════════════════════════════════════════════════╗");
+    info!("║           VedDB Server v0.2.0 Starting                    ║");
+    info!("╚═══════════════════════════════════════════════════════════╝");
+    info!("");
+    info!("Configuration:");
+    info!("  • Data Directory: {}", args.data_dir.display());
+    info!("  • Listen Address: {}:{}", args.host, args.port);
+    info!("  • Cache Size: {}MB", args.cache_size_mb);
+    info!("  • Debug Mode: {}", args.debug);
+    info!("");
+
+    // Create data directory if it doesn't exist
+    std::fs::create_dir_all(&args.data_dir)?;
+
+    info!("Initializing storage engine...");
+
+    // Initialize cache configuration
+    let mut cache_config = CacheConfig::default();
+    cache_config.max_size_bytes = args.cache_size_mb * 1024 * 1024;
+
+    // Initialize persistent layer
+    let persistent_layer = Arc::new(PersistentLayer::new(&args.data_dir)?);
+
+    // Initialize hybrid storage engine
+    let _storage = Arc::new(HybridStorageEngine::new(
+        cache_config,
+        persistent_layer,
+    ));
+
+    info!("✓ Storage engine initialized");
+    info!("");
+
+    // Initialize authentication system
+    info!("Initializing authentication system...");
+    let auth_db_path = args
+        .data_dir
+        .join("users.db")
+        .to_string_lossy()
+        .to_string();
+
+    let jwt_secret = b"veddb-secret-key-change-in-production";
+    let session_timeout_hours = 24;
+
+    let mut auth_system_instance =
+        AuthSystem::new(&auth_db_path, jwt_secret, session_timeout_hours)?;
+    auth_system_instance.initialize().await?;
+
+    let auth_system = Arc::new(RwLock::new(auth_system_instance));
+
+    // Create JWT service for connection manager
+    let jwt_service = Arc::new(JwtService::new(
+        jwt_secret,
+        session_timeout_hours,
+    )?);
+
+    info!("✓ Authentication system initialized");
+    info!("");
+
+    // Create connection manager
+    let connection_manager = ConnectionManager::new(
+        auth_system,
+        jwt_service,
+        None, // No TLS for now
     );
 
-    // Create VedDB configuration
-    let config = VedDbConfig {
-        memory_size: args.memory_mb * 1024 * 1024,
-        session_timeout_secs: args.session_timeout,
-        ..Default::default()
-    };
+    // Parse bind address
+    let bind_addr: SocketAddr =
+        format!("{}:{}", args.host, args.port).parse()?;
 
-    // Initialize VedDB instance
-    let veddb = if args.create {
-        info!("Creating new VedDB instance: {}", args.name);
-        VedDb::create(&args.name, config)?
-    } else {
-        info!("Opening existing VedDB instance: {}", args.name);
-        match VedDb::open(&args.name) {
-            Ok(db) => db,
-            Err(_) => {
-                warn!("Failed to open existing instance, creating new one");
-                VedDb::create(&args.name, config)?
-            }
-        }
-    };
+    info!("Starting TCP server on {}...", bind_addr);
+    info!("✓ TCP server started");
+    info!("");
+    info!("VedDB Server is ready to accept connections");
+    info!("Press Ctrl+C to shutdown");
+    info!("");
 
-    let veddb = Arc::new(veddb);
-
-    // Print initial statistics
-    let stats = veddb.get_stats();
-    info!(
-        "VedDB initialized - Memory: {:.1}MB used / {:.1}MB total",
-        stats.memory_used as f64 / (1024.0 * 1024.0),
-        stats.memory_size as f64 / (1024.0 * 1024.0)
-    );
-
-    // Start worker pool
-    info!("Starting {} worker threads", args.workers);
-    let worker_pool = WorkerPool::new(veddb.clone(), args.workers).await?;
-
-    // Start gRPC server
-    info!("Starting gRPC server on port {}", args.port);
-    let grpc_server = VedDbServer::new(veddb.clone());
-    let grpc_handle = tokio::spawn(async move { grpc_server.serve(args.port).await });
-
-    // Start cleanup task
-    let cleanup_veddb = veddb.clone();
-    let cleanup_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            let cleaned = cleanup_veddb.cleanup_stale_sessions();
-            if cleaned > 0 {
-                info!("Cleaned up {} stale sessions", cleaned);
-            }
-        }
-    });
-
-    // Start stats reporting task
-    let stats_veddb = veddb.clone();
-    let stats_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            interval.tick().await;
-            let stats = stats_veddb.get_stats();
-            info!(
-                "Stats - Ops: {}, Keys: {}, Sessions: {}, Topics: {}, Memory: {:.1}MB",
-                stats.total_operations,
-                stats.kv_keys,
-                stats.active_sessions,
-                stats.active_topics,
-                stats.memory_used as f64 / (1024.0 * 1024.0)
-            );
-        }
+    // Start server in background task
+    let server_handle = tokio::spawn(async move {
+        connection_manager.listen(bind_addr).await
     });
 
     // Wait for shutdown signal
-    info!("VedDB Server running. Press Ctrl+C to shutdown.");
-
     tokio::select! {
         _ = signal::ctrl_c() => {
-            info!("Received Ctrl+C, shutting down...");
+            info!("");
+            info!("Received shutdown signal, stopping server...");
         }
-        result = grpc_handle => {
+        result = server_handle => {
             match result {
-                Ok(Ok(())) => info!("gRPC server completed"),
-                Ok(Err(e)) => error!("gRPC server error: {}", e),
-                Err(e) => error!("gRPC server task error: {}", e),
+                Ok(Ok(())) => info!("Server completed normally"),
+                Ok(Err(e)) => info!("Server error: {:?}", e),
+                Err(e) => info!("Server task error: {}", e),
             }
         }
     }
 
-    // Graceful shutdown
-    info!("Shutting down worker pool...");
-    worker_pool.shutdown().await;
+    info!("Shutting down storage engine...");
+    info!("✓ VedDB Server shutdown complete");
 
-    cleanup_handle.abort();
-    stats_handle.abort();
-
-    // Final statistics
-    let final_stats = veddb.get_stats();
-    info!(
-        "Final stats - Total operations: {}, Uptime: {}s",
-        final_stats.total_operations, final_stats.uptime_secs
-    );
-
-    info!("VedDB Server shutdown complete");
     Ok(())
 }

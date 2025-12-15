@@ -9,10 +9,12 @@
 pub mod key_manager;
 pub mod document_encryption;
 pub mod key_rotation;
+pub mod tls;
 
 pub use key_manager::*;
 pub use document_encryption::*;
 pub use key_rotation::*;
+pub use tls::*;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,8 @@ pub struct EncryptionEngine {
     key_manager: KeyManager,
     document_encryption: DocumentEncryption,
     key_rotation_scheduler: Option<KeyRotationScheduler>,
+    tls_config: Option<TlsConfig>,
+    tls_acceptor: Option<TlsAcceptor>,
 }
 
 impl EncryptionEngine {
@@ -86,6 +90,8 @@ impl EncryptionEngine {
             key_manager,
             document_encryption,
             key_rotation_scheduler: None,
+            tls_config: None,
+            tls_acceptor: None,
         })
     }
 
@@ -140,6 +146,79 @@ impl EncryptionEngine {
         self.key_rotation_scheduler
             .as_ref()
             .map(|scheduler| scheduler.get_rotation_statistics())
+    }
+
+    /// Configure TLS settings
+    pub fn configure_tls(&mut self, tls_config: TlsConfig) -> Result<()> {
+        if tls_config.enabled {
+            let acceptor = TlsAcceptor::new(&tls_config)?;
+            self.tls_acceptor = Some(acceptor);
+            log::info!("TLS 1.3 configured and enabled");
+        } else {
+            self.tls_acceptor = None;
+            log::info!("TLS disabled");
+        }
+        
+        self.tls_config = Some(tls_config);
+        Ok(())
+    }
+
+    /// Check if TLS is enabled
+    pub fn is_tls_enabled(&self) -> bool {
+        self.tls_config
+            .as_ref()
+            .map(|config| config.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Get TLS acceptor for server connections
+    pub fn tls_acceptor(&self) -> Option<&TlsAcceptor> {
+        self.tls_acceptor.as_ref()
+    }
+
+    /// Create TLS connector for client connections
+    pub fn create_tls_connector(&self) -> Result<TlsConnector> {
+        let tls_config = self.tls_config
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("TLS not configured"))?;
+        
+        TlsConnector::new(tls_config)
+    }
+
+    /// Create TLS connector with client certificate
+    pub fn create_tls_connector_with_cert(&self, cert_file: &str, key_file: &str) -> Result<TlsConnector> {
+        let tls_config = self.tls_config
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("TLS not configured"))?;
+        
+        TlsConnector::new_with_client_cert(tls_config, cert_file, key_file)
+    }
+
+    /// Get TLS configuration
+    pub fn tls_config(&self) -> Option<&TlsConfig> {
+        self.tls_config.as_ref()
+    }
+
+    /// Validate TLS certificate and key files
+    pub fn validate_tls_certificates(&self) -> Result<()> {
+        let tls_config = self.tls_config
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("TLS not configured"))?;
+
+        if !tls_config.enabled {
+            return Ok(());
+        }
+
+        let cert_file = tls_config.cert_file
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Certificate file not specified"))?;
+        let key_file = tls_config.key_file
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Private key file not specified"))?;
+
+        TlsCertificateGenerator::validate_cert_and_key(cert_file, key_file)?;
+        log::info!("TLS certificates validated successfully");
+        Ok(())
     }
 
     /// Check if encryption is enabled
@@ -419,5 +498,61 @@ mod tests {
         
         // Should no longer have rotation scheduler
         assert!(engine.get_rotation_statistics().is_none());
+    }
+
+    #[test]
+    fn test_tls_configuration() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        
+        let mut engine = EncryptionEngine::new(config, temp_dir.path().to_str().unwrap()).unwrap();
+        
+        // Initially TLS not configured
+        assert!(!engine.is_tls_enabled());
+        assert!(engine.tls_acceptor().is_none());
+        
+        // Configure TLS (will fail due to missing cert files, but config should be set)
+        let tls_config = TlsConfig {
+            enabled: false, // Disabled to avoid file errors
+            ..Default::default()
+        };
+        
+        engine.configure_tls(tls_config).unwrap();
+        assert!(engine.tls_config().is_some());
+        assert!(!engine.is_tls_enabled()); // Still disabled
+    }
+
+    #[test]
+    fn test_tls_connector_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        
+        let mut engine = EncryptionEngine::new(config, temp_dir.path().to_str().unwrap()).unwrap();
+        
+        // Configure TLS for client-only (no server cert needed for connector)
+        let tls_config = TlsConfig {
+            enabled: false, // Don't enable server-side TLS
+            ca_file: None, // Use system roots
+            ..Default::default()
+        };
+        
+        engine.configure_tls(tls_config).unwrap();
+        
+        // Should be able to create connector even without server TLS enabled
+        let connector = engine.create_tls_connector();
+        assert!(connector.is_ok());
+    }
+
+    #[test]
+    fn test_tls_validation_without_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        
+        let engine = EncryptionEngine::new(config, temp_dir.path().to_str().unwrap()).unwrap();
+        
+        // Should fail without TLS config
+        let result = engine.validate_tls_certificates();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not configured"));
     }
 }

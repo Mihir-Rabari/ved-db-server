@@ -371,6 +371,52 @@ impl PersistentLayer {
         Ok(())
     }
 
+    /// Drop a collection (delete all documents in the collection)
+    pub fn drop_collection(&self, collection: &str) -> Result<()> {
+        let prefix = format!("{}:", collection);
+
+        #[cfg(feature = "rocksdb-storage")]
+        {
+            let cf = self.db.cf_handle("documents")
+                .context("Documents column family not found")?;
+
+            // Collect all keys to delete
+            let mut keys_to_delete = Vec::new();
+            let iter = self.db.prefix_iterator_cf(cf, prefix.as_bytes());
+            for item in iter {
+                let (key, _) = item?;
+                if !key.starts_with(prefix.as_bytes()) {
+                    break;
+                }
+                keys_to_delete.push(key.to_vec());
+            }
+
+            // Delete all keys
+            for key in keys_to_delete {
+                self.db.delete_cf(cf, key)
+                    .context("Failed to delete document")?;
+            }
+        }
+
+        #[cfg(not(feature = "rocksdb-storage"))]
+        {
+            let mut docs = self.documents.write();
+            let keys_to_remove: Vec<_> = docs.keys()
+                .filter(|k| k.starts_with(prefix.as_bytes()))
+                .cloned()
+                .collect();
+            
+            for key in keys_to_remove {
+                docs.remove(&key);
+            }
+        }
+
+        // Also delete collection metadata
+        self.delete_metadata(&format!("collection:{}", collection))?;
+
+        Ok(())
+    }
+
     /// Make a document key for RocksDB
     fn make_document_key(collection: &str, doc_id: DocumentId) -> Vec<u8> {
         format!("{}:{}", collection, doc_id).into_bytes()
