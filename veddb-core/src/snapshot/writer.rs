@@ -164,8 +164,10 @@ pub async fn create_snapshot(
     let header = SnapshotHeader::new(wal_sequence);
     writer.write_header(header)?;
 
-    // Get all collection names (simplified - in real implementation would scan metadata)
-    let collection_names = vec!["users", "posts", "comments"]; // Placeholder
+    // Get all collection names
+    let collection_names = persistent_layer
+        .list_collections()
+        .unwrap_or_default(); // Fallback to empty if listing fails
 
     // Write metadata
     let metadata = SnapshotMetadata {

@@ -5,12 +5,15 @@
 use super::ast::{Filter, Projection, Query, Sort, SortOrder};
 use super::planner::{QueryPlanner, QueryPlanError};
 use crate::document::{Document, Value};
+use crate::index::manager::IndexManager; // Import IndexManager
 use regex::Regex;
 use std::cmp::Ordering as CmpOrdering;
+use std::sync::Arc;
 
 /// Query executor
 pub struct QueryExecutor {
     planner: QueryPlanner,
+    index_manager: Option<Arc<IndexManager>>,
 }
 
 impl QueryExecutor {
@@ -18,7 +21,13 @@ impl QueryExecutor {
     pub fn new() -> Self {
         Self {
             planner: QueryPlanner::new(),
+            index_manager: None,
         }
+    }
+
+    /// Set index manager for index scan optimization
+    pub fn set_index_manager(&mut self, index_manager: Arc<IndexManager>) {
+        self.index_manager = Some(index_manager);
     }
 
     /// Execute a query against a collection
@@ -62,15 +71,142 @@ impl QueryExecutor {
         Ok(results)
     }
 
-    /// Execute an index scan (placeholder for task 4.3)
+    /// Execute an index scan using IndexManager
     fn execute_index_scan(
         &self,
         documents: Vec<Document>,
         query: &Query,
     ) -> Result<Vec<Document>, QueryExecutionError> {
-        // For now, fall back to collection scan
-        // This will be optimized with actual index usage in task 4.3
-        self.execute_collection_scan(documents, query)
+        use crate::index::btree::IndexKey;
+        use std::collections::HashMap;
+
+        // If no index manager, fall back to collection scan
+        let index_manager = match &self.index_manager {
+            Some(mgr) => mgr,
+            None => return self.execute_collection_scan(documents, query),
+        };
+
+        // Get execution plan to determine which index to use
+        let plan = self.planner.create_plan(query)?;
+        let index_name = match &plan.use_index {
+            Some(name) => name,
+            None => return self.execute_collection_scan(documents, query),
+        };
+
+        // Build document map for fast lookup by ID
+        let doc_map: HashMap<crate::document::DocumentId, &Document> = documents
+            .iter()
+            .map(|d| (d.id, d))
+            .collect();
+
+        // Get document IDs from index based on filter type
+        let doc_ids = self.get_doc_ids_from_index(index_manager, index_name, &query.filter)?;
+
+        // Fetch documents by ID
+        let mut results: Vec<Document> = doc_ids
+            .into_iter()
+            .filter_map(|doc_id| doc_map.get(&doc_id).map(|d| (*d).clone()))
+            .collect();
+
+        // Apply remaining filters (in case of complex AND/OR conditions)
+        results.retain(|doc| self.matches_filter(doc, &query.filter).unwrap_or(false));
+
+        Ok(results)
+    }
+
+    /// Get document IDs from index based on filter
+    fn get_doc_ids_from_index(
+        &self,
+        index_manager: &IndexManager,
+        index_name: &str,
+        filter: &Filter,
+    ) -> Result<Vec<crate::document::DocumentId>, QueryExecutionError> {
+        use crate::index::btree::IndexKey;
+
+        match filter {
+            // Exact match
+            Filter::Eq { field: _, value } => {
+                let key = IndexKey::from_values(vec![value.clone()])
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index key error: {}", e)))?;
+                
+                index_manager.find_with_index(index_name, &key)
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index lookup error: {}", e)))
+            }
+
+            // Greater than
+            Filter::Gt { field: _, value } => {
+                let start_key = IndexKey::from_values(vec![value.clone()])
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index key error: {}", e)))?;
+                
+                index_manager.find_range_with_index(
+                    index_name,
+                    Some(&start_key),
+                    None,
+                    false, // exclude start
+                    false,
+                )
+                .map_err(|e| QueryExecutionError::ExecutionError(format!("Index range error: {}", e)))
+            }
+
+            // Greater than or equal
+            Filter::Gte { field: _, value } => {
+                let start_key = IndexKey::from_values(vec![value.clone()])
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index key error: {}", e)))?;
+                
+                index_manager.find_range_with_index(
+                    index_name,
+                    Some(&start_key),
+                    None,
+                    true, // include start
+                    false,
+                )
+                .map_err(|e| QueryExecutionError::ExecutionError(format!("Index range error: {}", e)))
+            }
+
+            // Less than
+            Filter::Lt { field: _, value } => {
+                let end_key = IndexKey::from_values(vec![value.clone()])
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index key error: {}", e)))?;
+                
+                index_manager.find_range_with_index(
+                    index_name,
+                    None,
+                    Some(&end_key),
+                    false,
+                    false, // exclude end
+                )
+                .map_err(|e| QueryExecutionError::ExecutionError(format!("Index range error: {}", e)))
+            }
+
+            // Less than or equal
+            Filter::Lte { field: _, value } => {
+                let end_key = IndexKey::from_values(vec![value.clone()])
+                    .map_err(|e| QueryExecutionError::ExecutionError(format!("Index key error: {}", e)))?;
+                
+                index_manager.find_range_with_index(
+                    index_name,
+                    None,
+                    Some(&end_key),
+                    false,
+                    true, // include end
+                )
+                .map_err(|e| QueryExecutionError::ExecutionError(format!("Index range error: {}", e)))
+            }
+
+            // AND: Extract first indexable sub-filter
+            Filter::And(filters) => {
+                for f in filters {
+                    if matches!(f, Filter::Eq { .. } | Filter::Gt { .. } | Filter::Gte { .. } | Filter::Lt { .. } | Filter::Lte { .. }) {
+                        return self.get_doc_ids_from_index(index_manager, index_name, f);
+                    }
+                }
+                // No indexable sub-filter, return empty
+                Ok(Vec::new())
+            }
+
+            // Other filters: not optimized with index
+            _ => Ok(Vec::new()),
+        }
     }
 
     /// Check if a document matches a filter

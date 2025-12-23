@@ -1,208 +1,225 @@
-# VedDB Server v0.1.21
+# VedDB Server v0.2.0
 
-**High-performance in-memory key-value database server with TCP protocol**
+**High-performance document database with encryption, replication, and advanced features**
 
-VedDB Server is a fast, lightweight, and easy-to-use in-memory database designed for low-latency data access. Built in Rust with a focus on simplicity and performance.
+VedDB is a production-ready, in-memory document database built in Rust with enterprise features including encryption at rest, master-slave replication, point-in-time recovery, and comprehensive backup management.
 
-![Windows](https://img.shields.io/badge/platform-windows-blue)
+![Docker](https://img.shields.io/badge/docker-ready-blue)
 ![Rust](https://img.shields.io/badge/rust-1.75+-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features
 
-- **⚡ Fast KV Operations**: Sub-millisecond SET/GET/DELETE operations
-- **🔌 TCP Protocol**: Simple binary protocol for network access
-- **🔒 Thread-Safe**: Lock-free concurrent access using DashMap
-- **📊 Session Management**: Multi-client support with automatic cleanup
-- **🛠️ Worker Pool**: Multi-threaded request processing
-- **📝 List Keys**: Enumerate all stored keys
-- **🎯 Simple Protocol**: Easy to implement clients in any language
+### Core Capabilities
+- **📄 Document Store**: JSON-based document storage with schema validation
+- **🔍 Advanced Querying**: Complex queries with filtering, sorting, and aggregation
+- **📊 Indexing**: Multiple index types (B-Tree, Hash, Full-Text)
+- **💾 Hybrid Storage**: In-memory caching with RocksDB persistence
 
-## 🚀 Quick Start
-VedDB Server is currently tested and supported on **Windows**. You can download the pre-built executable:
+### Enterprise Features
+- **🔐 Encryption at Rest**: AES-256-GCM encryption with key rotation
+- **🔄 Master-Slave Replication**: Real-time replication with automatic failover
+- **💾 Smart Backups**: Point-in-time recovery, incremental backups, compression
+- **🛡️ Authentication**: JWT-based auth with role-based access control (RBAC)
+- **📊 Monitoring**: Built-in Prometheus metrics
 
-**Option 1: Download from Website**
-- Visit our website and download the latest Windows `.exe`
+### Performance
+- **⚡ Fast Operations**: Sub-millisecond queries with caching
+- **🔒 Thread-Safe**: Lock-free concurrent access
+- **📈 Scalable**: Handle thousands of operations per second
 
-**Option 2: GitHub Releases**
-- Go to [Releases](https://github.com/Mihir-Rabari/ved-db-server/releases)
-- Download `veddb-server-v0.1.21-windows.exe`
+## 🐳 Quick Start with Docker
 
-**Option 3: Official Client**
-- **Rust Client + CLI**: [ved-db-rust-client v0.0.12](https://github.com/Mihir-Rabari/ved-db-rust-client)
-  - 📦 [Crates.io](https://crates.io/crates/veddb-client) - `cargo add veddb-client`
-  - 📚 [Documentation](https://docs.rs/veddb-client) - API docs
-  - 🖥️ Includes both Rust library and CLI tool (`veddb-cli.exe`)
+### Pull and Run
+```bash
+docker pull mihirrabariii/veddb-server:latest
 
-### Running the Server
+docker run -d \
+  -p 50051:50051 \
+  -v veddb-data:/var/lib/veddb/data \
+  mihirrabariii/veddb-server:latest
+```
 
-# Or with custom configuration
-veddb-server.exe --memory 128 --workers 8 --port 50051
+### Docker Compose
+```yaml
+version: '3.8'
 
-### Configuration Options
+services:
+  veddb:
+    image: mihirrabariii/veddb-server:latest
+    ports:
+      - "50051:50051"
+    volumes:
+      - veddb-data:/var/lib/veddb/data
+      - veddb-backups:/var/lib/veddb/backups
+    environment:
+      - RUST_LOG=info
+      - VEDDB_CACHE_SIZE=512
+    restart: unless-stopped
 
-| Option | Default | Description |
-{{ ... }}
-| `--memory` | 64 | Memory size in MB |
-| `--workers` | 4 | Number of worker threads |
-| `--port` | 50051 | TCP server port |
-| `--path` | veddb_main | Database file path |
+volumes:
+  veddb-data:
+  veddb-backups:
+```
+
+### With All Features
+```bash
+docker run -d \
+  -p 50051:50051 \
+  -v veddb-data:/var/lib/veddb/data \
+  -v veddb-backups:/var/lib/veddb/backups \
+  mihirrabariii/veddb-server:latest \
+  veddb-server \
+    --data-dir /var/lib/veddb/data \
+    --enable-backups \
+    --backup-dir /var/lib/veddb/backups \
+    --enable-encryption \
+    --master-key your-secret-key \
+    --cache-size-mb 512
+```
+
+## 🛠️ Building from Source
+
+### Prerequisites
+- Rust 1.75 or later ([Install Rust](https://rustup.rs/))
+- Docker (optional, for containerization)
+
+### Build
+```bash
+git clone https://github.com/Mihir-Rabari/ved-db-server.git
+cd ved-db-server
+cargo build --release --package veddb-server
+```
+
+Binary will be at: `target/release/veddb-server`
+
+### Run
+```bash
+./target/release/veddb-server \
+  --data-dir ./veddb_data \
+  --port 50051 \
+  --cache-size-mb 256
+```
 
 ## 📡 Protocol
 
-VedDB uses a simple binary protocol over TCP. All integers are **little-endian**.
-
-### Command Format (24 bytes header + payload)
-```
-┌─────────┬───────┬──────────┬─────┬─────────┬─────────┬───────┬─────┬───────┐
-│ opcode  │ flags │ reserved │ seq │ key_len │ val_len │ extra │ key │ value │
-│ (1 byte)│(1 byte)│(2 bytes)│(4)  │  (4)    │  (4)    │  (8)  │ ... │  ...  │
-└─────────┴───────┴──────────┴─────┴─────────┴─────────┴───────┴─────┴───────┘
-```
-
-### Response Format (20 bytes header + payload)
-```
-┌────────┬───────┬──────────┬─────┬─────────────┬───────┬─────────┐
-│ status │ flags │ reserved │ seq │ payload_len │ extra │ payload │
-│(1 byte)│(1 byte)│(2 bytes)│(4)  │     (4)     │  (8)  │   ...   │
-└────────┴───────┴──────────┴─────┴─────────────┴───────┴─────────┘
-```
+VedDB uses a binary TCP protocol on port 50051. See [PROTOCOL.md](docs/PROTOCOL.md) for details.
 
 ### Supported Operations
 
-| OpCode | Command | Description |
-|--------|---------|-------------|
-| `0x01` | PING | Health check - returns "pong" |
-| `0x02` | SET | Store key-value pair |
-| `0x03` | GET | Retrieve value by key |
-| `0x04` | DELETE | Remove key |
-| `0x09` | LIST | List all keys (newline-separated) |
+**Document Operations:**
+- Insert, Update, Delete, Query documents
+- Collection management (create, drop, list)
+- Index management (create, drop, list)
 
-### Status Codes
+**Advanced Features:**
+- Backup Management (create, restore, list, delete)
+- Key Management (import, export, rotate, metadata)
+- Replication (add slave, remove slave, list, force sync)
+- Authentication (login, logout, user info)
 
-| Code | Status | Description |
-|------|--------|-------------|
-| `0x00` | OK | Operation successful |
-| `0x01` | NotFound | Key not found |
-| `0x04` | InternalError | Server error |
+## 🔒 Security
 
-## 🏗️ Architecture
+### Encryption
+```bash
+# Enable encryption with master key
+veddb-server --enable-encryption --master-key "your-secure-key"
+```
+
+### Authentication
+```bash
+# Default admin credentials
+Username: admin
+Password: admin123
+
+# ⚠️ Change immediately in production!
+```
+
+### TLS/SSL
+Coming in v0.3.0
+
+## 📊 Monitoring
+
+VedDB exposes Prometheus metrics at `/metrics` endpoint:
+
+- Connection statistics
+- Operation counts
+- Cache hit/miss rates
+- Replication lag
+- Backup statistics
+
+## 🗺️ Architecture
 
 ```
 ┌─────────────────────────────────────┐
 │    TCP Server (0.0.0.0:50051)       │
 ├─────────────────────────────────────┤
-│  Worker Pool (4 threads)            │
-│  - Concurrent request handling      │
+│  Connection Manager                 │
 │  - Session management               │
+│  - Authentication                   │
 ├─────────────────────────────────────┤
-│  SimpleKvStore (DashMap)            │
-│  - Lock-free concurrent access      │
-│  - Thread-safe operations           │
-│  - O(1) average lookup              │
+│  Storage Layer                      │
+│  ├─ In-Memory Cache (DashMap)       │
+│  ├─ RocksDB (Persistent)            │
+│  └─ Write-Ahead Log (WAL)           │
+├─────────────────────────────────────┤
+│  Advanced Features                  │
+│  ├─ Encryption Engine (AES-256)     │
+│  ├─ Backup Manager                  │
+│  └─ Replication Manager             │
 └─────────────────────────────────────┘
 ```
 
-## 📊 Performance
-
-Tested on Windows with Intel i7, 16GB RAM:
-
-- **Latency**: < 1ms for most operations
-- **Throughput**: 10,000+ ops/sec per connection
-- **Concurrency**: Lock-free data structure for parallel access
-- **Memory**: Efficient in-memory storage with DashMap
-
-## 🔧 Usage Examples
-
-### Using with veddb-cli (Rust Client)
-
-```
-# Ping server
-veddb-cli.exe ping
-
-# Set a key
-veddb-cli.exe kv set name John
-
-# Get a key
-veddb-cli.exe kv get name
-
-# List all keys
-veddb-cli.exe kv list
-
-# Delete a key
-veddb-cli.exe kv del name
-```
-
-### Implementing Your Own Client
-
-The protocol is simple enough to implement in any language. See the protocol section above for details.
-
-Example pseudo-code:
-```
-1. Connect to 127.0.0.1:50051
-2. Build command: [opcode][flags][reserved][seq][key_len][val_len][extra][key][value]
-3. Send command bytes
-4. Read response: [status][flags][reserved][seq][payload_len][extra][payload]
-5. Parse response based on status code
-```
-
-## 🛠️ Development
-
-### Building from Source
-
-**Prerequisites:**
-- Rust 1.75 or later ([Install Rust](https://rustup.rs/))
-- Windows 10/11
-
-```
-git clone https://github.com/Mihir-Rabari/ved-db-server.git
-cd ved-db-server
-cargo build --release
-```
-
-Binary will be at: `target\release\veddb-server.exe`
-
-### Running Tests
-
-```
-cargo test --workspace
-```
-
-### Logging
-
-VedDB uses `tracing` for structured logging. Set `RUST_LOG` environment variable:
-- `info` - Default level
-- `debug` - Verbose logging
-- `trace` - Very verbose logging
-
 ## 📦 Components
 
-- **veddb-core**: Core data structures and protocol definitions
-- **veddb-server**: TCP server implementation
-- **simple_kv**: Lock-free KV store using DashMap
+- **veddb-core**: Core data structures, protocol, and storage engine
+- **veddb-server**: TCP server implementation and CLI
+- **veddb-compass**: Desktop GUI management tool (Coming soon)
+- **veddb-admin**: Web-based admin interface (Planned)
 
-## 🗺️ Roadmap
+## 📚 Documentation
 
-### Current (v0.1.21)
-- ✅ Basic KV operations (SET, GET, DELETE)
-- ✅ LIST keys operation
-- ✅ TCP protocol
-- ✅ Multi-threaded worker pool
-- ✅ Session management
-- ✅ Windows support
+- **Docker Hub**: [mihirrabariii/veddb-server](https://hub.docker.com/r/mihirrabariii/veddb-server)
+- **GitHub**: [Mihir-Rabari/ved-db-server](https://github.com/Mihir-Rabari/ved-db-server)
+- **API Docs**: Coming soon
 
-### Planned (v0.2.x)
-- ⏳ Persistence (WAL + snapshots)
-- ⏳ Authentication
-- ⏳ Pub/Sub messaging
-- ⏳ TTL (time-to-live) for keys
-- ⏳ Pattern matching for LIST
+## 🔧 Configuration Options
 
-### Future (v1.0.x)
-- ⏳ Replication
-- ⏳ Clustering
-- ⏳ Linux/macOS support
-- ⏳ gRPC protocol option
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--data-dir` | `./veddb_data` | Data directory path |
+| `--port` | `50051` | TCP server port |
+| `--host` | `0.0.0.0` | Listen address |
+| `--cache-size-mb` | `256` | Cache size in MB |
+| `--enable-backups` | `false` | Enable backup system |
+| `--backup-dir` | `./backups` | Backup directory |
+| `--enable-encryption` | `false` | Enable encryption |
+| `--master-key` | - | Master encryption key |
+
+## 🚀 Roadmap
+
+### ✅ Completed (v0.2.0)
+- Document storage and querying
+- Indexing (B-Tree, Hash, Full-Text)
+- Encryption at rest (AES-256-GCM)
+- Master-slave replication
+- Point-in-time backup & recovery
+- JWT authentication
+- Prometheus metrics
+- Docker deployment
+
+### 🔜 Planned (v0.3.0)
+- TLS/SSL support
+- Clustering (multi-master)
+- Transaction support
+- GraphQL API
+- REST API gateway
+
+### 🎯 Future (v1.0.0)
+- Distributed consensus (Raft)
+- Cross-region replication
+- Time-series data support
+- Geospatial indexing
 
 ## 📄 License
 
@@ -210,13 +227,20 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🤝 Contributing
 
-Contributions welcome! Please open an issue or PR on GitHub.
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📧 Contact
 
 - **Email**: mihirrabari2604@gmail.com
 - **Instagram**: @mihirrabariii
+- **GitHub**: [Mihir-Rabari](https://github.com/Mihir-Rabari)
 
 ---
 
-**Built with ❤️ in Rust**
+**Built with ❤️ in Rust** | [Docker Hub](https://hub.docker.com/r/mihirrabariii/veddb-server) | [Report Issue](https://github.com/Mihir-Rabari/ved-db-server/issues)

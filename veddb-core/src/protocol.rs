@@ -8,6 +8,7 @@
 
 pub mod compatibility;
 pub mod connection;
+pub mod advanced_features;
 
 use std::mem;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ pub const PROTOCOL_V2: u8 = 0x02; // New v0.2.0 protocol
 // Re-export compatibility handler and connection management
 pub use compatibility::{CompatibilityHandler, LEGACY_KV_COLLECTION};
 pub use connection::{ConnectionManager, Session, SessionId, ConnectionStats, ConnectionError};
+pub use advanced_features::*;
 
 /// Command opcodes for v0.1.x (legacy) and v0.2.0 protocols
 #[repr(u8)]
@@ -92,6 +94,35 @@ pub enum OpCode {
     HKeys = 0x38,
     HVals = 0x39,
     HLen = 0x3A,
+    
+    // User Management
+    ListUsers = 0x3B,
+    CreateUser = 0x3C,
+    DeleteUser = 0x3D,
+    UpdateUserRole = 0x3E,
+    
+    // Backup & Recovery Operations (0x40-0x4F)
+    CreateBackup = 0x40,
+    ListBackups = 0x41,
+    RestoreBackup = 0x42,
+    DeleteBackup = 0x43,
+    PointInTimeRecover = 0x44,
+    
+    // Replication Management (0x50-0x5F)
+    GetReplicationStatus = 0x50,
+    AddSlave = 0x51,
+    RemoveSlave = 0x52,
+    ListSlaves = 0x53,
+    ForceSync = 0x54,
+    
+    // Key Management (0x60-0x6F)
+    CreateKey = 0x60,
+    ListKeys = 0x61,
+    RotateKey = 0x62,
+    ExportKey = 0x63,
+    ImportKey = 0x64,
+    GetKeyMetadata = 0x65,
+    GetKeysExpiring = 0x66,
 }
 
 impl TryFrom<u8> for OpCode {
@@ -151,6 +182,35 @@ impl TryFrom<u8> for OpCode {
             0x38 => Ok(OpCode::HKeys),
             0x39 => Ok(OpCode::HVals),
             0x3A => Ok(OpCode::HLen),
+            // User Management
+            0x3B => Ok(OpCode::ListUsers),
+            0x3C => Ok(OpCode::CreateUser),
+            0x3D => Ok(OpCode::DeleteUser),
+            0x3E => Ok(OpCode::UpdateUserRole),
+            
+            // Backup & Recovery
+            0x40 => Ok(OpCode::CreateBackup),
+            0x41 => Ok(OpCode::ListBackups),
+            0x42 => Ok(OpCode::RestoreBackup),
+            0x43 => Ok(OpCode::DeleteBackup),
+            0x44 => Ok(OpCode::PointInTimeRecover),
+            
+            // Replication Management
+            0x50 => Ok(OpCode::GetReplicationStatus),
+            0x51 => Ok(OpCode::AddSlave),
+            0x52 => Ok(OpCode::RemoveSlave),
+            0x53 => Ok(OpCode::ListSlaves),
+            0x54 => Ok(OpCode::ForceSync),
+            
+            // Key Management
+            0x60 => Ok(OpCode::CreateKey),
+            0x61 => Ok(OpCode::ListKeys),
+            0x62 => Ok(OpCode::RotateKey),
+            0x63 => Ok(OpCode::ExportKey),
+            0x64 => Ok(OpCode::ImportKey),
+            0x65 => Ok(OpCode::GetKeyMetadata),
+            0x66 => Ok(OpCode::GetKeysExpiring),
+            
             _ => Err(()),
         }
     }
@@ -624,6 +684,18 @@ pub struct CreateCollectionRequest {
     pub schema: Option<Value>, // JSON schema
 }
 
+/// Collection drop request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DropCollectionRequest {
+    pub name: String,
+}
+
+/// List collections request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListCollectionsRequest {
+    pub filter: Option<Value>,
+}
+
 /// Index creation request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndexRequest {
@@ -631,6 +703,19 @@ pub struct CreateIndexRequest {
     pub name: String,
     pub fields: Vec<IndexField>,
     pub unique: bool,
+}
+
+/// Index drop request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DropIndexRequest {
+    pub collection: String,
+    pub name: String,
+}
+
+/// List indexes request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListIndexesRequest {
+    pub collection: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -712,6 +797,53 @@ pub enum HashOperation {
     Keys,
     Vals,
     Len,
+}
+
+// ============================================================================
+// User Management Request/Response Structs
+// ============================================================================
+
+/// Request to create a new user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub password: String,
+    pub role: String,
+}
+
+/// Request to delete a user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteUserRequest {
+    pub username: String,
+}
+
+/// Request to update a user's role
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateUserRoleRequest {
+    pub username: String,
+    pub role: String,
+}
+
+/// User information response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfoResponse {
+    pub username: String,
+    pub role: String,
+    pub created_at: String,
+    pub last_login: Option<String>,
+    pub enabled: bool,
+}
+
+/// Server information/metrics response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfoResponse {
+    pub uptime_seconds: u64,
+    pub connection_count: u32,
+    pub total_collections: u64,
+    pub memory_usage_bytes: u64,
+    pub ops_per_second: f64,
+    pub cache_hit_rate: f64,
+    pub version: String,
 }
 
 /// Generic operation response

@@ -36,3 +36,7 @@ custom-protocol = ["tauri/custom-protocol"]
 [[bin]]
 name = "test_connection"
 path = "test_connection.rs"
+
+[[bin]]
+name = "test_compass_ops"
+path = "test_compass_ops.rs"

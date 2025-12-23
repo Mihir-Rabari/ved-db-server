@@ -10,6 +10,7 @@ use crate::cache::data_structures::CacheData;
 use crate::document::{Document, DocumentId};
 use crate::schema::{CacheStrategy, CacheWarmingStrategy, Schema};
 use crate::storage::persistent::PersistentLayer;
+use crate::index::manager::IndexManager; // Import IndexManager
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -26,6 +27,8 @@ pub struct HybridStorageEngine {
     persistent_layer: Arc<PersistentLayer>,
     /// Collection schemas
     schemas: Arc<RwLock<HashMap<String, Schema>>>,
+    /// Index managers per collection
+    index_managers: Arc<RwLock<HashMap<String, Arc<IndexManager>>>>,
     /// Write-behind queue
     write_behind_queue: Arc<RwLock<Vec<WriteBehindEntry>>>,
     /// Statistics
@@ -42,6 +45,7 @@ impl HybridStorageEngine {
             cache_layer: Arc::new(CacheLayer::new(cache_config)),
             persistent_layer,
             schemas: Arc::new(RwLock::new(HashMap::new())),
+            index_managers: Arc::new(RwLock::new(HashMap::new())),
             write_behind_queue: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(HybridStorageStats::default()),
         }
@@ -272,6 +276,74 @@ impl HybridStorageEngine {
             self.stats.record_persistent_write();
             Ok(deleted)
         }
+    }
+
+    /// Create a collection
+    pub fn create_collection(&self, name: &str) -> Result<()> {
+        self.persistent_layer.create_collection(name)
+    }
+
+    /// List collections
+    pub fn list_collections(&self) -> Result<Vec<String>> {
+        self.persistent_layer.list_collections()
+    }
+
+    /// Scan all documents in a collection (for snapshots/backups)
+    /// Note: This primarily scans persistent storage. For full consistency,
+    /// consider calling flush() before scanning.
+    pub fn scan_collection(&self, collection: &str) -> Result<Vec<Document>> {
+        self.persistent_layer.scan_collection(collection)
+    }
+
+    /// Drop a collection
+    pub fn drop_collection(&self, collection: &str) -> Result<()> {
+        // Clear from cache first
+        self.invalidate_collection_cache(collection);
+        // Drop from persistent storage
+        self.persistent_layer.drop_collection(collection)
+    }
+
+    /// Create an index
+    pub fn create_index(&self, collection: &str, name: &str, fields: Vec<crate::protocol::IndexField>, unique: bool) -> Result<()> {
+        self.persistent_layer.create_index(collection, name, fields, unique)
+    }
+
+    /// List indexes
+    pub fn list_indexes(&self, collection: &str) -> Result<Vec<serde_json::Value>> {
+        self.persistent_layer.list_indexes(collection)
+    }
+
+    /// Drop an index
+    pub fn drop_index(&self, collection: &str, name: &str) -> Result<()> {
+        self.persistent_layer.drop_index(collection, name)
+    }
+
+    /// Get or create IndexManager for a collection
+    pub fn get_index_manager(&self, collection: &str) -> Arc<IndexManager> {
+        let mut managers = self.index_managers.write();
+        managers
+            .entry(collection.to_string())
+            .or_insert_with(|| Arc::new(IndexManager::new(collection.to_string())))
+            .clone()
+    }
+
+    /// Execute a query with index optimization
+    pub fn query(&self, collection: &str, query: &crate::query::Query) -> Result<Vec<Document>> {
+        use crate::query::QueryExecutor;
+        
+        // Get all documents from collection
+        let documents = self.scan_collection(collection)?;
+        
+        // Create executor
+        let mut executor = QueryExecutor::new();
+        
+        // If index manager exists for this collection, use it
+        let index_manager = self.get_index_manager(collection);
+        executor.set_index_manager(index_manager);
+        
+        // Execute query
+        executor.execute(documents, query)
+            .map_err(|e| anyhow::anyhow!("Query execution error: {}", e))
     }
 
     /// Write-through strategy: update both cache and persistent storage

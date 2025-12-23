@@ -8,9 +8,25 @@ pub const SNAPSHOT_MAGIC: &[u8; 8] = b"VEDDB\0\0\0";
 
 /// Current snapshot format version
 pub const SNAPSHOT_VERSION: u32 = 1;
+/// Version constant for future reference
+pub const SNAPSHOT_VERSION_V1: u32 = 1;
 
 /// End marker for snapshot files
 pub const SNAPSHOT_END_MARKER: &[u8; 10] = b"VEDDB_END\0";
+
+/// Checksum algorithm used in snapshot (future-proof)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ChecksumAlgo {
+    SHA256 = 1,
+    // Future: BLAKE3 = 2,
+}
+
+impl Default for ChecksumAlgo {
+    fn default() -> Self {
+        Self::SHA256
+    }
+}
 
 /// Snapshot header (256 bytes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +39,8 @@ pub struct SnapshotHeader {
     pub timestamp: DateTime<Utc>,
     /// WAL sequence number at snapshot time
     pub sequence: u64,
+    /// Checksum algorithm (future-proof)
+    pub checksum_algo: ChecksumAlgo,
     /// SHA-256 checksum of header
     pub checksum: [u8; 32],
 }
@@ -35,6 +53,7 @@ impl SnapshotHeader {
             version: SNAPSHOT_VERSION,
             timestamp: Utc::now(),
             sequence,
+            checksum_algo: ChecksumAlgo::default(),
             checksum: [0u8; 32],
         }
     }

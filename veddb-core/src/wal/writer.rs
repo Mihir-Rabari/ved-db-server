@@ -222,14 +222,20 @@ impl WalWriter {
         wal_dir.join(format!("wal-{:010}.log", file_number))
     }
 
-    /// Scan existing WAL files to determine starting sequence and file number
+    /// Scan existing WAL files to determine starting sequence and file number.
+    /// 
+    /// INVARIANT: WAL sequence numbers are GLOBAL and STRICTLY MONOTONIC (not per-file).
+    /// This function scans all WAL files to find the maximum sequence number used,
+    /// ensuring new entries continue with a globally unique sequence.
     fn scan_existing_wals(wal_dir: &Path) -> Result<(u64, u64), WalError> {
+        use super::reader::WalReader;
+        
         if !wal_dir.exists() {
             return Ok((0, 0));
         }
 
         let mut max_file_number = 0u64;
-        let mut max_sequence = 0u64;
+        let mut global_max_sequence = 0u64;
 
         for entry in std::fs::read_dir(wal_dir)? {
             let entry = entry?;
@@ -242,38 +248,107 @@ impl WalWriter {
                         if let Ok(file_num) = num_str.parse::<u64>() {
                             max_file_number = max_file_number.max(file_num);
 
-                            // TODO: Scan file for max sequence
-                            // For now, we'll just use file number * 1000000 as estimate
-                            max_sequence = max_sequence.max(file_num * 1000000);
+                            // Scan file for max sequence (enforces global monotonic invariant)
+                            match Self::scan_file_for_max_sequence(&path) {
+                                Ok(file_max_seq) => {
+                                    global_max_sequence = global_max_sequence.max(file_max_seq);
+                                }
+                                Err(WalError::FileNotFound(_)) => {
+                                    // File was deleted between scan and read, skip it
+                                    continue;
+                                }
+                                Err(e) => {
+                                    // Log warning but continue - file might be corrupted
+                                    eprintln!("Warning: Failed to scan WAL file {:?}: {}", path, e);
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        Ok((max_sequence, max_file_number))
+        // Next sequence is one more than the max found
+        let next_sequence = if global_max_sequence > 0 {
+            global_max_sequence + 1
+        } else {
+            0
+        };
+
+        Ok((next_sequence, max_file_number))
     }
 
-    /// Compact old WAL files (remove files before a certain sequence)
+    /// Scan a single WAL file to find the maximum sequence number it contains.
+    /// Returns 0 if file is empty or unreadable.
+    fn scan_file_for_max_sequence(path: &Path) -> Result<u64, WalError> {
+        use super::reader::WalReader;
+        
+        let mut reader = WalReader::open(path)?;
+        let mut max_seq = 0u64;
+
+        loop {
+            match reader.next_entry() {
+                Ok(Some(entry)) => {
+                    max_seq = max_seq.max(entry.sequence);
+                }
+                Ok(None) => {
+                    // End of file
+                    break;
+                }
+                Err(WalError::CorruptedEntry(seq)) => {
+                    // Skip corrupted entry but record sequence if valid
+                    max_seq = max_seq.max(seq);
+                    // Continue reading - may find more valid entries
+                    continue;
+                }
+                Err(_) => {
+                    // Stop on other errors (IO error, deserialization error)
+                    break;
+                }
+            }
+        }
+
+        Ok(max_seq)
+    }
+
+    /// Compact old WAL files (remove files where ALL entries have sequence < before_sequence).
+    /// 
+    /// Only removes files that contain ONLY entries with sequence numbers strictly less than
+    /// the specified threshold. This ensures no data loss during compaction.
     pub async fn compact(&self, before_sequence: u64) -> Result<usize, WalError> {
         let mut removed_count = 0;
+        let current_file_num = self.file_number.load(Ordering::Relaxed);
 
         for entry in std::fs::read_dir(&self.config.wal_dir)? {
             let entry = entry?;
             let path = entry.path();
 
-            // TODO: Check if file contains only entries before the sequence
-            // For now, we'll use a simple heuristic based on file number
-
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                 if file_name.starts_with("wal-") && file_name.ends_with(".log") {
                     if let Some(num_str) = file_name.strip_prefix("wal-").and_then(|s| s.strip_suffix(".log")) {
                         if let Ok(file_num) = num_str.parse::<u64>() {
-                            // Simple heuristic: remove files that are at least 2 behind current
-                            let current_file_num = self.file_number.load(Ordering::Relaxed);
-                            if file_num + 2 < current_file_num {
-                                std::fs::remove_file(&path)?;
-                                removed_count += 1;
+                            // Never remove the current file
+                            if file_num >= current_file_num {
+                                continue;
+                            }
+
+                            // Check if file contains only entries before the sequence
+                            match Self::file_contains_only_entries_before(&path, before_sequence) {
+                                Ok(true) => {
+                                    // Safe to remove - all entries are before threshold
+                                    if let Err(e) = std::fs::remove_file(&path) {
+                                        eprintln!("Warning: Failed to remove WAL file {:?}: {}", path, e);
+                                    } else {
+                                        removed_count += 1;
+                                    }
+                                }
+                                Ok(false) => {
+                                    // File contains entries >= threshold, keep it
+                                }
+                                Err(e) => {
+                                    // Can't validate file, keep it to be safe
+                                    eprintln!("Warning: Failed to validate WAL file {:?}: {}", path, e);
+                                }
                             }
                         }
                     }
@@ -282,6 +357,46 @@ impl WalWriter {
         }
 
         Ok(removed_count)
+    }
+
+    /// Check if a WAL file contains only entries with sequence < threshold.
+    /// Returns true if ALL entries have sequence < before_sequence (safe to delete).
+    /// Returns false if ANY entry has sequence >= before_sequence (must keep).
+    fn file_contains_only_entries_before(path: &Path, before_sequence: u64) -> Result<bool, WalError> {
+        use super::reader::WalReader;
+        
+        let mut reader = WalReader::open(path)?;
+
+        loop {
+            match reader.next_entry() {
+                Ok(Some(entry)) => {
+                    // If any entry is at or after threshold, file must be kept
+                    if entry.sequence >= before_sequence {
+                        return Ok(false);
+                    }
+                }
+                Ok(None) => {
+                    // Reached end of file - all entries were before threshold
+                    break;
+                }
+                Err(WalError::CorruptedEntry(seq)) => {
+                    // Even corrupted entries count - check their sequence
+                    if seq >= before_sequence {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                Err(_) => {
+                    // Can't read file properly - return error to be safe
+                    return Err(WalError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Failed to fully read WAL file for validation"
+                    )));
+                }
+            }
+        }
+
+        Ok(true)
     }
 }
 

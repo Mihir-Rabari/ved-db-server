@@ -80,7 +80,7 @@ pub async fn replay_all_wals(
 }
 
 /// Apply a single operation to the persistent layer
-async fn apply_operation(
+pub async fn apply_operation(
     operation: &Operation,
     persistent_layer: &PersistentLayer,
 ) -> Result<(), anyhow::Error> {

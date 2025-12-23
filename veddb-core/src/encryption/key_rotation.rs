@@ -129,6 +129,21 @@ impl KeyRotationScheduler {
         let now = Utc::now();
         self.last_check = now;
 
+        // Check for keys approaching expiration (warn at 80% threshold)
+        {
+            let key_manager = encryption_engine.key_manager();
+            let expiry_warnings = key_manager.get_keys_with_expiry_warnings(self.config.rotation_interval_days);
+            for (key, days_remaining) in expiry_warnings {
+                log::warn!(
+                    "Key rotation warning: Key '{}' will expire in {} days (created: {}, last rotated: {})",
+                    key.id,
+                    days_remaining,
+                    key.created_at.format("%Y-%m-%d"),
+                    key.last_rotated.format("%Y-%m-%d")
+                );
+            }
+        }
+
         // Get list of key IDs that need rotation (avoid borrowing conflicts)
         let key_ids_needing_rotation: Vec<String> = {
             let key_manager = encryption_engine.key_manager();

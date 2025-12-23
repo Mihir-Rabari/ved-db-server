@@ -109,6 +109,12 @@ pub struct FieldDefinition {
     pub indexed: bool,
     /// Validators to apply
     pub validators: Vec<Validator>,
+    
+    // Encryption settings (Phase 5)
+    /// Is this field encrypted at rest?
+    pub encrypted: bool,
+    /// Encryption key ID (if encrypted)
+    pub encryption_key_id: Option<String>,
 }
 
 impl FieldDefinition {
@@ -121,6 +127,8 @@ impl FieldDefinition {
             unique: false,
             indexed: false,
             validators: Vec::new(),
+            encrypted: false,
+            encryption_key_id: None,
         }
     }
 

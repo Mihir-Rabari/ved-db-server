@@ -16,7 +16,10 @@ use veddb_core::{
     AuthSystem, JwtService,
     CacheConfig, PersistentLayer, HybridStorageEngine,
     ConnectionManager,
+    BackupManager, BackupConfig,
+    EncryptionEngine, EncryptionConfig,
 };
+use tokio::sync::RwLock as TokioRwLock;
 
 #[derive(Parser, Debug)]
 #[command(name = "veddb-server")]
@@ -42,6 +45,22 @@ struct Args {
     /// Enable debug logging
     #[arg(short = 'd', long)]
     debug: bool,
+
+    /// Enable backup functionality
+    #[arg(long)]
+    enable_backups: bool,
+
+    /// Backup directory path
+    #[arg(long, default_value = "./veddb_backups")]
+    backup_dir: PathBuf,
+
+    /// Enable encryption
+    #[arg(long)]
+    enable_encryption: bool,
+
+    /// Master key for encryption (set via VEDDB_MASTER_KEY env var or this flag)
+    #[arg(long)]
+    master_key: Option<String>,
 }
 
 #[tokio::main]
@@ -85,10 +104,10 @@ async fn main() -> Result<()> {
     // Initialize persistent layer
     let persistent_layer = Arc::new(PersistentLayer::new(&args.data_dir)?);
 
-    // Initialize hybrid storage engine
-    let _storage = Arc::new(HybridStorageEngine::new(
+    // Initialize hybrid storage-engine
+    let storage = Arc::new(HybridStorageEngine::new(
         cache_config,
-        persistent_layer,
+        persistent_layer.clone(),
     ));
 
     info!("✓ Storage engine initialized");
@@ -120,12 +139,66 @@ async fn main() -> Result<()> {
     info!("✓ Authentication system initialized");
     info!("");
 
-    // Create connection manager
-    let connection_manager = ConnectionManager::new(
+    // Initialize backup manager (if enabled)
+    let backup_manager = if args.enable_backups {
+        info!("Initializing backup manager...");
+        std::fs::create_dir_all(&args.backup_dir)?;
+        let backup_config = BackupConfig {
+            backup_dir: args.backup_dir.clone(),
+            compress: false,
+            include_wal: true,
+        };
+        let backup_mgr = Arc::new(BackupManager::new(
+            backup_config,
+            persistent_layer.clone()
+        ));
+        info!("✓ Backup manager initialized (dir: {})", args.backup_dir.display());
+        info!("");
+        Some(backup_mgr)
+    } else {
+        info!("Backup functionality: disabled");
+        None
+    };
+
+    // Initialize encryption engine (if enabled)
+    let encryption_engine = if args.enable_encryption {
+        info!("Initializing encryption engine...");
+        let keys_dir = args.data_dir.join("keys");
+        std::fs::create_dir_all(&keys_dir)?;
+        
+        let encryption_config = EncryptionConfig {
+            enabled: true,
+            master_key: args.master_key,
+            key_rotation_days: 90,
+            collection_encryption: std::collections::HashMap::new(),
+        };
+        
+        let enc_engine = Arc::new(TokioRwLock::new(
+            EncryptionEngine::new(encryption_config, keys_dir.to_str().unwrap())?
+        ));
+        info!("✓ Encryption engine initialized");
+        info!("");
+        Some(enc_engine)
+    } else {
+        info!("Encryption: disabled");
+        None
+    };
+
+    // Create connection manager with optional features
+    let mut connection_manager = ConnectionManager::new(
         auth_system,
         jwt_service,
         None, // No TLS for now
+        Arc::clone(&storage),
     );
+
+    // Wire optional managers
+    if let Some(backup_mgr) = backup_manager {
+        connection_manager = connection_manager.with_backup_manager(backup_mgr);
+    }
+    if let Some(enc_engine) = encryption_engine {
+        connection_manager = connection_manager.with_encryption_engine(enc_engine);
+    }
 
     // Parse bind address
     let bind_addr: SocketAddr =

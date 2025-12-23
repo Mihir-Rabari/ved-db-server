@@ -1,9 +1,28 @@
 # Rust
 /target/
 **/*.rs.bk
-**/*.swp
 Cargo.lock
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Log files
+*.log
+*.txt
+!LICENSE*.txt
+
+# Docker build artifacts
+docker-build.log
+
+# Data directories
+veddb_data/
+backups/
+keys/
+
+# OS specific
 .DS_Store
-/.idea/
-/.vscode/
+Thumbs.db
 /coverage/
+*.log

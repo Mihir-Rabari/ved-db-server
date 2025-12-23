@@ -460,48 +460,49 @@ async fn get_collections(
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have a direct list_collections command yet
-    // For now, we'll return mock data but with a real connection check
-    match client.ping().await {
-        Ok(_) => {
-            // Return mock data for now - this would be replaced with actual collection listing
-            // when the server implements the ListCollections opcode
-            Ok(vec![
-                CollectionInfo {
-                    name: "users".to_string(),
-                    document_count: 1250,
-                    size_bytes: 2_048_576,
-                    indexes: vec![
-                        IndexInfo {
-                            name: "_id".to_string(),
-                            fields: vec!["_id".to_string()],
-                            unique: true,
-                            size_bytes: 32_768,
-                        },
-                        IndexInfo {
-                            name: "email_idx".to_string(),
-                            fields: vec!["email".to_string()],
-                            unique: true,
-                            size_bytes: 65_536,
-                        },
-                    ],
-                },
-                CollectionInfo {
-                    name: "products".to_string(),
-                    document_count: 5000,
-                    size_bytes: 10_485_760,
-                    indexes: vec![
-                        IndexInfo {
-                            name: "_id".to_string(),
-                            fields: vec!["_id".to_string()],
-                            unique: true,
-                            size_bytes: 65_536,
-                        },
-                    ],
-                },
-            ])
+    // Use the real list_collections command
+    match client.list_collections().await {
+        Ok(collection_names) => {
+            let mut collections = Vec::new();
+            
+            for name in collection_names {
+                // For now, we don't have an endpoint to get detailed stats per collection
+                // so we'll fetch indexes for each collection and set other stats to 0
+                
+                let indexes = match client.list_indexes(name.as_str()).await {
+                    Ok(idxs) => {
+                        idxs.into_iter().filter_map(|idx| {
+                            // Extract index info from Value
+                            // Use as_object() to get the BTreeMap from veddb_client::Value
+                            let obj = idx.as_object()?;
+                            let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            let unique = obj.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
+                            let fields = obj.get("fields").and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                .unwrap_or_else(Vec::new);
+                                
+                            Some(IndexInfo {
+                                name,
+                                fields,
+                                unique,
+                                size_bytes: 0, // Placeholder
+                            })
+                        }).collect()
+                    },
+                    Err(_) => Vec::new(),
+                };
+
+                collections.push(CollectionInfo {
+                    name,
+                    document_count: 0, // Placeholder until we have count stats
+                    size_bytes: 0,     // Placeholder
+                    indexes,
+                });
+            }
+            
+            Ok(collections)
         }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+        Err(e) => Err(format!("Failed to list collections: {}", e)),
     }
 }
 
@@ -579,22 +580,19 @@ async fn get_server_metrics(
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have a direct metrics command yet
-    // For now, we'll return mock data but with a real connection check
-    match client.ping().await {
-        Ok(_) => {
-            // Return mock metrics for now - this would be replaced with actual metrics retrieval
-            // when the server implements metrics endpoints
+    // Use real server info from the Info opcode
+    match client.info().await {
+        Ok(info) => {
             Ok(ServerMetrics {
-                ops_per_second: 1250.5,
-                latency_p99: 2.3,
-                memory_usage_bytes: 536_870_912, // 512 MB
-                cache_hit_rate: 0.85,
-                connection_count: 42,
-                uptime_seconds: 86400, // 1 day
+                ops_per_second: info.ops_per_second,
+                latency_p99: 2.3, // Placeholder - not available in basic ServerInfo
+                memory_usage_bytes: info.memory_usage_bytes,
+                cache_hit_rate: info.cache_hit_rate,
+                connection_count: info.connection_count,
+                uptime_seconds: info.uptime_seconds,
             })
         }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+        Err(e) => Err(format!("Failed to get server metrics: {}", e)),
     }
 }
 
@@ -649,23 +647,18 @@ async fn create_index(
 #[tauri::command]
 async fn drop_index(
     connection_id: String,
-    _collection: String,
-    _index_name: String,
+    collection: String,
+    index_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let clients = state.clients.read().await;
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have a direct drop_index command yet
-    // For now, we'll just check the connection and return success
-    match client.ping().await {
-        Ok(_) => {
-            // This would be replaced with actual index dropping when implemented
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            Ok(())
-        }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+    // Use real drop_index command
+    match client.drop_index(collection, index_name).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to drop index: {}", e)),
     }
 }
 
@@ -679,99 +672,78 @@ async fn get_users(
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have a direct user listing command yet
-    // For now, we'll return mock data but with a real connection check
-    match client.ping().await {
-        Ok(_) => {
-            // Return mock user data for now - this would be replaced with actual user listing
-            // when the server implements user management commands
-            Ok(vec![
-                UserInfo {
-                    username: "admin".to_string(),
-                    role: "admin".to_string(),
-                    created_at: "2024-01-15T10:30:00Z".to_string(),
-                    last_login: Some("2024-11-24T09:15:00Z".to_string()),
-                    enabled: true,
-                },
-                UserInfo {
-                    username: "readonly_user".to_string(),
-                    role: "read-only".to_string(),
-                    created_at: "2024-02-01T14:20:00Z".to_string(),
-                    last_login: Some("2024-11-23T16:45:00Z".to_string()),
-                    enabled: true,
-                },
-            ])
+    // Use real user listing from the ListUsers opcode
+    match client.list_users().await {
+        Ok(users) => {
+            Ok(users.into_iter().map(|u| UserInfo {
+                username: u.username,
+                role: u.role,
+                created_at: u.created_at,
+                last_login: u.last_login,
+                enabled: u.enabled,
+            }).collect())
         }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+        Err(e) => Err(format!("Failed to list users: {}", e)),
     }
 }
 
 #[tauri::command]
 async fn create_user(
     connection_id: String,
-    _username: String,
-    _password: String,
-    _role: String,
+    username: String,
+    password: String,
+    role: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let clients = state.clients.read().await;
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have direct user management commands yet
-    // For now, we'll just check the connection and simulate the operation
-    match client.ping().await {
-        Ok(_) => {
-            // This would be replaced with actual user creation when implemented
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-            Ok(())
-        }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+    // Use real user creation from the CreateUser opcode
+    let request = veddb_client::CreateUserRequest {
+        username,
+        password,
+        role,
+    };
+    
+    match client.create_user(request).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to create user: {}", e)),
     }
 }
 
 #[tauri::command]
 async fn delete_user(
     connection_id: String,
-    _username: String,
+    username: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let clients = state.clients.read().await;
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have direct user management commands yet
-    // For now, we'll just check the connection and simulate the operation
-    match client.ping().await {
-        Ok(_) => {
-            // This would be replaced with actual user deletion when implemented
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            Ok(())
-        }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+    // Use real user deletion from the DeleteUser opcode
+    match client.delete_user(&username).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to delete user: {}", e)),
     }
 }
 
 #[tauri::command]
 async fn update_user_role(
     connection_id: String,
-    _username: String,
-    _role: String,
+    username: String,
+    role: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let clients = state.clients.read().await;
     let client = clients.get(&connection_id)
         .ok_or_else(|| "Connection not found".to_string())?;
     
-    // Note: VedDB v0.2.0 doesn't have direct user management commands yet
-    // For now, we'll just check the connection and simulate the operation
-    match client.ping().await {
-        Ok(_) => {
-            // This would be replaced with actual user role update when implemented
-            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-            Ok(())
-        }
-        Err(e) => Err(format!("Connection lost: {}", e)),
+    // Use real user role update from the UpdateUserRole opcode
+    match client.update_user_role(&username, &role).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to update user role: {}", e)),
     }
 }
 
@@ -921,6 +893,33 @@ async fn create_collection(
         Err(e) => {
             error!("Failed to create collection '{}': {}", collection_name, e);
             Err(format!("Failed to create collection: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+async fn drop_collection(
+    connection_id: String,
+    collection_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Dropping collection '{}' on connection {}", collection_name, connection_id);
+    
+    let clients = state.clients.read().await;
+    let client = clients.get(&connection_id)
+        .ok_or_else(|| {
+            error!("Drop collection failed: Connection {} not found", connection_id);
+            "Connection not found".to_string()
+        })?;
+    
+    match client.drop_collection(&collection_name).await {
+        Ok(_) => {
+            info!("Collection '{}' dropped successfully", collection_name);
+            Ok(())
+        },
+        Err(e) => {
+            error!("Failed to drop collection '{}': {}", collection_name, e);
+            Err(format!("Failed to drop collection: {}", e))
         }
     }
 }
@@ -1258,6 +1257,7 @@ fn main() {
             delete_document,
             // Collection operations
             create_collection,
+            drop_collection,
             // Import/Export operations
             export_collection,
             import_collection,

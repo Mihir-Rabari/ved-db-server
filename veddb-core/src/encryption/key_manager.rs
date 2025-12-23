@@ -285,31 +285,148 @@ impl KeyManager {
         self.keys.values().filter(|key| key.active).count()
     }
 
-    /// Export key for backup (encrypted with master key)
-    pub fn export_key(&self, key_id: &str) -> Result<String> {
-        let _key = self.get_key_metadata(key_id)?;
+    /// Get keys approaching rotation deadline (warn at 80% of rotation period)
+    /// 
+    /// Returns a list of keys that are getting close to their rotation deadline
+    /// along with the number of days remaining. Warns at 80% of the rotation period
+    /// (e.g., for 90-day rotation, warns at 72 days).
+    pub fn get_keys_with_expiry_warnings(&self, rotation_days: u32) -> Vec<(&EncryptionKey, i64)> {
+        const WARN_THRESHOLD: f32 = 0.80; // Warn at 80% of rotation period
         
+        let warn_days = (rotation_days as f32 * WARN_THRESHOLD) as i64;
+        let now = Utc::now();
+        
+        self.keys.values()
+            .filter(|key| key.active)
+            .filter_map(|key| {
+                let key_age_days = (now - key.last_rotated).num_days();
+                
+                // Warn if key is between 80% and 100% of rotation period
+                if key_age_days >= warn_days && key_age_days < rotation_days as i64 {
+                    let days_remaining = rotation_days as i64 - key_age_days;
+                    Some((key, days_remaining))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Export key for backup (encrypted with master key)
+    /// 
+   /// Returns a hex-encoded string containing the encrypted key and metadata.
+    /// This allows secure backup of encryption keys for disaster recovery.
+    pub fn export_key(&self, key_id: &str) -> Result<String> {
+        use crate::encryption::document_encryption::DocumentEncryption;
+        
+        // Verify master key exists
         if self.master_key.is_none() {
-            return Err(anyhow!("Cannot export key without master key"));
+            return Err(anyhow!("Master key required for key export. Initialize KeyManager with a master key."));
         }
         
-        // In a real implementation, this would encrypt the key with the master key
-        // For now, we'll return a placeholder
-        Ok(format!("encrypted_key_export_{}", key_id))
+        // Get the key to export
+        let key_metadata = self.get_key_metadata(key_id)?;
+        
+        // Create export payload (key bytes + metadata for validation)
+        let export_data = serde_json::json!({
+            "key_id": key_metadata.id,
+            "key_bytes": hex::encode(&key_metadata.key),
+            "created_at": key_metadata.created_at,
+            "last_rotated": key_metadata.last_rotated,
+            "version": key_metadata.version,
+            "active": key_metadata.active,
+            "export_version": 1, // For future compatibility
+        });
+        
+        let plaintext_json = serde_json::to_vec(&export_data)?;
+        
+        // Encrypt with master key using AES-256-GCM
+        let doc_encryption = DocumentEncryption::new();
+        let encrypted_bytes = doc_encryption.encrypt(
+            &plaintext_json,
+            self.master_key.as_ref().unwrap()
+        )?;
+        
+        // Encode as hex for safe text transport
+        let export_string = hex::encode(&encrypted_bytes);
+        
+        log::info!("Exported encryption key '{}' (encrypted with master key, {} bytes)", 
+                   key_id, export_string.len());
+        
+        Ok(export_string)
     }
 
     /// Import key from backup (decrypt with master key)
-    pub fn import_key(&mut self, key_id: &str, _encrypted_data: &str) -> Result<()> {
+    /// 
+    /// Decrypts and imports a previously exported key. Validates key integrity
+    /// and prevents duplicate imports.
+    pub fn import_key(&mut self, encrypted_data: &str) -> Result<String> {
+        use crate::encryption::document_encryption::DocumentEncryption;
+        use serde_json::Value;
+        
+        // Verify master key exists
         if self.master_key.is_none() {
-            return Err(anyhow!("Cannot import key without master key"));
+            return Err(anyhow!("Master key required for key import. Initialize KeyManager with a master key."));
         }
         
-        // In a real implementation, this would decrypt and restore the key
-        // For now, we'll create a new key
-        self.create_key(key_id)?;
+        // Decode from hex
+        let encrypted_bytes = hex::decode(encrypted_data)
+            .map_err(|e| anyhow!("Invalid hex in exported key: {}", e))?;
         
-        log::info!("Imported encryption key: {}", key_id);
-        Ok(())
+        // Decrypt with master key
+        let doc_encryption = DocumentEncryption::new();
+        let plaintext_json = doc_encryption.decrypt(
+            &encrypted_bytes,
+            self.master_key.as_ref().unwrap()
+        ).map_err(|e| anyhow!("Failed to decrypt key (wrong master key?): {}", e))?;
+        
+        // Parse export data
+        let export_data: Value = serde_json::from_slice(&plaintext_json)
+            .map_err(|e| anyhow!("Invalid export data format: {}", e))?;
+        
+        let key_id = export_data["key_id"].as_str()
+            .ok_or_else(|| anyhow!("Missing key_id in export data"))?;
+        
+        let key_bytes_hex = export_data["key_bytes"].as_str()
+            .ok_or_else(|| anyhow!("Missing key_bytes in export data"))?;
+        let key_bytes = hex::decode(key_bytes_hex)
+            .map_err(|e| anyhow!("Invalid key bytes encoding: {}", e))?;
+        
+        // Validate key length (AES-256 requires 32 bytes)
+        if key_bytes.len() != 32 {
+            return Err(anyhow!("Invalid key length: expected 32 bytes (AES-256), got {}", key_bytes.len()));
+        }
+        
+        // Check if key already exists
+        if self.keys.contains_key(key_id) {
+            return Err(anyhow!(
+                "Key '{}' already exists. Remove existing key first or use a different key ID.",
+                key_id
+            ));
+        }
+        
+        // Create EncryptionKey from exported data
+        let imported_key = EncryptionKey {
+            id: key_id.to_string(),
+            key: key_bytes,
+            created_at: serde_json::from_value(export_data["created_at"].clone())
+                .map_err(|e| anyhow!("Invalid created_at timestamp: {}", e))?,
+            last_rotated: serde_json::from_value(export_data["last_rotated"].clone())
+                .map_err(|e| anyhow!("Invalid last_rotated timestamp: {}", e))?,
+            active: export_data["active"].as_bool().unwrap_or(true),
+            version: export_data["version"].as_u64().unwrap_or(1) as u32,
+        };
+        
+        // Add to key manager
+        self.keys.insert(key_id.to_string(), imported_key);
+        
+        // Save to persistent storage
+        self.save_keys()?;
+        
+        log::info!("Successfully imported encryption key: {} (version {})", key_id, 
+                   export_data["version"].as_u64().unwrap_or(1));
+        
+        Ok(key_id.to_string())
     }
 }
 

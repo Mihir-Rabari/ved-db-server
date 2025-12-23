@@ -371,6 +371,22 @@ impl PersistentLayer {
         Ok(())
     }
 
+    /// Create a collection
+    pub fn create_collection(&self, name: &str) -> Result<()> {
+        // Add to collections list in metadata
+        let mut collections = self.get_collections_list()?;
+        if !collections.contains(&name.to_string()) {
+            collections.push(name.to_string());
+            self.save_collections_list(&collections)?;
+        }
+        Ok(())
+    }
+
+    /// List all collections
+    pub fn list_collections(&self) -> Result<Vec<String>> {
+        self.get_collections_list()
+    }
+
     /// Drop a collection (delete all documents in the collection)
     pub fn drop_collection(&self, collection: &str) -> Result<()> {
         let prefix = format!("{}:", collection);
@@ -413,8 +429,91 @@ impl PersistentLayer {
 
         // Also delete collection metadata
         self.delete_metadata(&format!("collection:{}", collection))?;
+        
+        // Remove from collections list
+        let mut collections = self.get_collections_list()?;
+        if let Some(pos) = collections.iter().position(|x| x == collection) {
+            collections.remove(pos);
+            self.save_collections_list(&collections)?;
+        }
+        
+        // Remove indexes
+        self.delete_metadata(&format!("indexes:{}", collection))?;
 
         Ok(())
+    }
+
+    /// Create an index
+    pub fn create_index(&self, collection: &str, name: &str, fields: Vec<crate::protocol::IndexField>, unique: bool) -> Result<()> {
+        let mut indexes = self.get_indexes_list(collection)?;
+        
+        // Check if index exists
+        if indexes.iter().any(|idx| idx.get("name").and_then(|v| v.as_str()) == Some(name)) {
+            return Ok(()); // Already exists
+        }
+        
+        let mut index_def = serde_json::Map::new();
+        index_def.insert("name".to_string(), serde_json::Value::String(name.to_string()));
+        index_def.insert("unique".to_string(), serde_json::Value::Bool(unique));
+        
+        let fields_val: Vec<serde_json::Value> = fields.into_iter().map(|f| {
+            let mut map = serde_json::Map::new();
+            map.insert("field".to_string(), serde_json::Value::String(f.field));
+            map.insert("direction".to_string(), serde_json::Value::Number(serde_json::Number::from(f.direction)));
+            serde_json::Value::Object(map)
+        }).collect();
+        
+        index_def.insert("fields".to_string(), serde_json::Value::Array(fields_val));
+        
+        indexes.push(serde_json::Value::Object(index_def));
+        self.save_indexes_list(collection, &indexes)?;
+        
+        Ok(())
+    }
+
+    /// List indexes
+    pub fn list_indexes(&self, collection: &str) -> Result<Vec<serde_json::Value>> {
+        self.get_indexes_list(collection)
+    }
+
+    /// Drop an index
+    pub fn drop_index(&self, collection: &str, name: &str) -> Result<()> {
+        let mut indexes = self.get_indexes_list(collection)?;
+        
+        if let Some(pos) = indexes.iter().position(|idx| idx.get("name").and_then(|v| v.as_str()) == Some(name)) {
+            indexes.remove(pos);
+            self.save_indexes_list(collection, &indexes)?;
+        }
+        
+        Ok(())
+    }
+
+    // Helper to get collections list
+    fn get_collections_list(&self) -> Result<Vec<String>> {
+        match self.get_metadata("collections")? {
+            Some(data) => serde_json::from_slice(&data).context("Failed to parse collections list"),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    // Helper to save collections list
+    fn save_collections_list(&self, collections: &[String]) -> Result<()> {
+        let data = serde_json::to_vec(collections).context("Failed to serialize collections list")?;
+        self.store_metadata("collections", &data)
+    }
+
+    // Helper to get indexes list
+    fn get_indexes_list(&self, collection: &str) -> Result<Vec<serde_json::Value>> {
+        match self.get_metadata(&format!("indexes:{}", collection))? {
+            Some(data) => serde_json::from_slice(&data).context("Failed to parse indexes list"),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    // Helper to save indexes list
+    fn save_indexes_list(&self, collection: &str, indexes: &[serde_json::Value]) -> Result<()> {
+        let data = serde_json::to_vec(indexes).context("Failed to serialize indexes list")?;
+        self.store_metadata(&format!("indexes:{}", collection), &data)
     }
 
     /// Make a document key for RocksDB
