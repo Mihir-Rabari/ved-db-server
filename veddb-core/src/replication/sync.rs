@@ -1,7 +1,8 @@
 //! Replication synchronization logic
 
 use crate::replication::{ReplicationMessage, ReplicationError, ReplicationResult, ReplicationConnection};
-use crate::wal::{WalEntry, WalReader};
+use crate::storage::HybridStorageEngine;
+use crate::wal::{WalEntry, WalReader, Operation};
 use crate::snapshot::{SnapshotWriter, SnapshotReader, format::SnapshotHeader};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc}; // Added mpsc if it was unused, but keeping imports clean is good. 
+use crate::protocol::IndexField; // Import IndexField
 use tracing::{debug, error, info, warn};
 
 /// Synchronization manager for handling full and incremental sync
@@ -24,10 +26,12 @@ pub struct SyncManager {
     wal_broadcast_tx: broadcast::Sender<WalEntry>,
     /// Replication lag tracking
     replication_lag: Arc<AtomicU64>,
+    /// Storage engine reference for snapshot operations
+    storage: Option<Arc<HybridStorageEngine>>,
 }
 
 impl SyncManager {
-    /// Create a new sync manager
+    /// Create a new sync manager without storage engine (basic mode)
     pub fn new<P: AsRef<Path>>(wal_dir: P, snapshot_dir: P) -> Self {
         let (wal_broadcast_tx, _) = broadcast::channel(1000);
         
@@ -37,7 +41,31 @@ impl SyncManager {
             snapshot_dir: snapshot_dir.as_ref().to_path_buf(),
             wal_broadcast_tx,
             replication_lag: Arc::new(AtomicU64::new(0)),
+            storage: None,
         }
+    }
+
+    /// Create a new sync manager with storage engine integration (full mode)
+    pub fn with_storage<P: AsRef<Path>>(
+        wal_dir: P, 
+        snapshot_dir: P, 
+        storage: Arc<HybridStorageEngine>
+    ) -> Self {
+        let (wal_broadcast_tx, _) = broadcast::channel(1000);
+        
+        Self {
+            current_sequence: Arc::new(AtomicU64::new(0)),
+            wal_dir: wal_dir.as_ref().to_path_buf(),
+            snapshot_dir: snapshot_dir.as_ref().to_path_buf(),
+            wal_broadcast_tx,
+            replication_lag: Arc::new(AtomicU64::new(0)),
+            storage: Some(storage),
+        }
+    }
+
+    /// Set storage engine reference (for late binding)
+    pub fn set_storage(&mut self, storage: Arc<HybridStorageEngine>) {
+        self.storage = Some(storage);
     }
 
     /// Update the current sequence number
@@ -365,15 +393,28 @@ impl SyncManager {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let snapshot_path = self.snapshot_dir.join(format!("temp_repl_{}.veddb", timestamp));
         
-        // Create snapshot writer
-        let mut writer = SnapshotWriter::create(&snapshot_path)
-            .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
-        
-        // Write snapshot data (this would integrate with the actual storage engine)
-        self.write_snapshot_data(&mut writer).await?;
-        
-        writer.finalize()
-            .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+        if let Some(storage) = &self.storage {
+            // Flush cache to persistent storage for consistency
+            if let Err(e) = storage.flush().await {
+                warn!("Failed to flush storage before snapshot: {}", e);
+            }
+            
+            // Use snapshot writer helper
+            let persistent = storage.persistent_layer().clone();
+            let sequence = self.current_sequence();
+            
+            crate::snapshot::writer::create_snapshot(
+                persistent, 
+                &snapshot_path, 
+                sequence
+            ).await.map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+        } else {
+             // Fallback for no storage
+             let mut writer = SnapshotWriter::create(&snapshot_path)
+                .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+             self.write_snapshot_data(&mut writer).await?;
+             writer.finalize().map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+        }
         
         Ok(snapshot_path)
     }
@@ -478,27 +519,174 @@ impl SyncManager {
         Ok((min_sequence, max_sequence))
     }
 
-    /// Write snapshot data (placeholder - would integrate with storage engine)
-    async fn write_snapshot_data(&self, _writer: &mut SnapshotWriter) -> ReplicationResult<()> {
-        // This would integrate with the actual storage engine to write
-        // all collections, documents, indexes, etc.
-        // For now, this is a placeholder
+    /// Write snapshot data (internal method for fallback)
+    async fn write_snapshot_data(&self, writer: &mut SnapshotWriter) -> ReplicationResult<()> {
+        // Just write header and basic metadata if no storage available
+        let header = SnapshotHeader::new(self.current_sequence());
+        writer.write_header(header)
+            .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+            
+        let metadata = crate::snapshot::SnapshotMetadata::default();
+        writer.write_metadata(&metadata)
+            .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+            
         Ok(())
     }
 
-    /// Apply snapshot to database (placeholder - would integrate with storage engine)
-    async fn apply_snapshot(&self, _reader: &mut SnapshotReader) -> ReplicationResult<()> {
-        // This would integrate with the actual storage engine to load
-        // all collections, documents, indexes, etc. from the snapshot
-        // For now, this is a placeholder
+    /// Apply snapshot to database.
+    async fn apply_snapshot(&self, reader: &mut SnapshotReader) -> ReplicationResult<()> {
+        if let Some(storage) = &self.storage {
+            // Read header (already read by caller or open?)
+            // Caller open() just opens file. apply_snapshot receives reader. 
+            // We should read header if not already read, but let's assume we start from beginning
+            // Wait, reader keeps state. 
+            // If caller called read_header(), we shouldn't call it again?
+            // In apply_full_sync, we opened reader but didn't read header using it.
+            // (We read header from file separately to verify)
+            // So we need to read header here to advance stream
+            
+            let _header = reader.read_header()
+                .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                
+            let metadata = reader.read_metadata()
+                .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                
+            info!("Applying snapshot with {} collections", metadata.collections_count);
+            
+            for _ in 0..metadata.collections_count {
+                let col_header = reader.read_collection_header()
+                    .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                    
+                info!("Restoring collection {} ({} docs)", col_header.name, col_header.document_count);
+                
+                 // Create collection if not exists (ignore error if exists)
+                let _ = storage.create_collection(&col_header.name);
+                
+                // Read and insert documents
+                for _ in 0..col_header.document_count {
+                    let doc = reader.read_document()
+                        .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                    
+                    storage.insert_document(&col_header.name, doc)
+                        .await.map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                
+                // Read and create indexes
+                for _ in 0..col_header.index_count {
+                    let index_def = reader.read_index()
+                        .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                    // Convert schema::IndexDefinition to Vec<protocol::IndexField>
+                    let fields = match &index_def.index_type {
+                        crate::schema::IndexType::Single { field } => vec![IndexField {
+                            field: field.clone(),
+                            direction: 1,
+                        }],
+                        crate::schema::IndexType::Compound { fields } => fields
+                            .iter()
+                            .map(|f| IndexField {
+                                field: f.clone(),
+                                direction: 1,
+                            })
+                            .collect(),
+                        _ => {
+                            warn!("Skipping unsupported index type for replication");
+                            continue;
+                        }
+                    };
+                    storage.create_index(&col_header.name, &index_def.name, fields, index_def.unique)
+                        .map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+            }
+            
+            reader.read_footer()
+                .map_err(|e| ReplicationError::SnapshotError(e.to_string()))?;
+                
+             // Flush to ensure durability
+            if let Err(e) = storage.flush().await {
+                warn!("Failed to flush storage after applying snapshot: {}", e);
+            }
+        } else {
+             info!("No storage engine attached, skipping snapshot application");
+        }
+        
         Ok(())
     }
 
-    /// Apply a WAL entry to the database (placeholder - would integrate with storage engine)
-    async fn apply_wal_entry(&self, _entry: &WalEntry) -> ReplicationResult<()> {
-        // This would integrate with the actual storage engine to apply
-        // the operation described in the WAL entry
-        // For now, this is a placeholder
+    /// Apply a WAL entry to the database.
+    async fn apply_wal_entry(&self, entry: &WalEntry) -> ReplicationResult<()> {
+        if let Some(storage) = &self.storage {
+            use crate::wal::Operation::*;
+            
+            match &entry.operation {
+                Insert { collection, doc } => {
+                    storage.insert_document(collection, doc.clone())
+                        .await.map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                Update { collection, id, changes } => {
+                     // Storage update_document takes complete document usually, or we need fetch-modify-write
+                     // But wait, Operation::Update has 'changes'.
+                     // HybridStorageEngine::update_document takes 'doc: Document' (replacement)
+                     // If WAL logs partial update, we have a mismatch.
+                     // But WAL likely logs full document for idempotency or the Operation define partials.
+                     // Looking at Operation::Update definition: changes: BTreeMap<String, Value>.
+                     // This is a partial update.
+                     // We need to fetch, apply changes, and update.
+                     
+                     if let Some(mut doc) = storage.get_document(collection, *id)
+                        .await.map_err(|e| ReplicationError::StorageError(e.to_string()))? {
+                        
+                        // Apply changes
+                        for (k, v) in changes {
+                            doc.insert(k.clone(), v.clone());
+                        }
+                        
+                        storage.update_document(collection, *id, doc)
+                            .await.map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                     }
+                }
+                Delete { collection, id } => {
+                    storage.delete_document(collection, *id)
+                        .await.map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                CreateCollection { name, .. } => {
+                    storage.create_collection(name)
+                        .map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                DropCollection { name } => {
+                    storage.drop_collection(name)
+                        .map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                CreateIndex { collection, index } => {
+                     // Convert schema::IndexDefinition to Vec<protocol::IndexField>
+                    let fields = match &index.index_type {
+                        crate::schema::IndexType::Single { field } => vec![IndexField {
+                            field: field.clone(),
+                            direction: 1,
+                        }],
+                        crate::schema::IndexType::Compound { fields } => fields
+                            .iter()
+                            .map(|f| IndexField {
+                                field: f.clone(),
+                                direction: 1,
+                            })
+                            .collect(),
+                        _ => {
+                            warn!("Skipping unsupported index type in WAL replay");
+                            return Ok(());
+                        }
+                    };
+                    storage.create_index(collection, &index.name, fields, index.unique)
+                         .map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+                DropIndex { collection, index_name } => {
+                    storage.drop_index(collection, index_name)
+                        .map_err(|e| ReplicationError::StorageError(e.to_string()))?;
+                }
+            }
+        } else {
+            debug!("No storage engine attached, skipping WAL entry {}", entry.sequence);
+        }
+        
         Ok(())
     }
 }

@@ -9,6 +9,7 @@
 //! - Slave promotion to master
 
 pub mod manager;
+pub mod manager_extensions;
 pub mod message;
 pub mod connection;
 pub mod sync;
@@ -40,6 +41,12 @@ pub struct ReplicationConfig {
     pub role: NodeRole,
     /// Maximum number of slaves (for master nodes)
     pub max_slaves: usize,
+    /// Bind address for replication listener (master mode)
+    /// Default: 0.0.0.0:50052
+    pub bind_address: SocketAddr,
+    /// Prefix for slave ID generation (slave mode)
+    /// Unique ID format: "{prefix}-{uuid}"
+    pub slave_id_prefix: String,
     /// Replication timeout
     pub timeout: Duration,
     /// Heartbeat interval
@@ -53,6 +60,8 @@ impl Default for ReplicationConfig {
         Self {
             role: NodeRole::Master,
             max_slaves: 10,
+            bind_address: "0.0.0.0:50052".parse().unwrap(),
+            slave_id_prefix: "slave".to_string(),
             timeout: Duration::from_secs(30),
             heartbeat_interval: Duration::from_secs(10),
             backoff_config: BackoffConfig::default(),
@@ -139,6 +148,9 @@ pub enum ReplicationError {
 
     #[error("WAL error: {0}")]
     WalError(String),
+
+    #[error("Storage error: {0}")]
+    StorageError(String),
 }
 
 pub type ReplicationResult<T> = Result<T, ReplicationError>;

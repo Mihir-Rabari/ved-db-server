@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  veddb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: veddb-server:latest
+    container_name: veddb-server
+    restart: unless-stopped
+    
+    ports:
+      - "50051:50051"  # VedDB TCP protocol port
+    
+    volumes:
+      # Persist database data
+      - veddb-data:/var/lib/veddb/data
+      # Persist backups (if enabled)
+      - veddb-backups:/var/lib/veddb/backups
+      # Persist encryption keys (if enabled)
+      - veddb-keys:/var/lib/veddb/keys
+    
+    environment:
+      # Optional: Set via .env file or override here
+      - RUST_LOG=info
+      # - VEDDB_MASTER_KEY=your-secret-key-here  # For encryption
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "veddb-server", "--version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    
+    # Optional: Enable backup functionality
+    # command: >
+    #   veddb-server
+    #   --data-dir /var/lib/veddb/data
+    #   --host 0.0.0.0
+    #   --port 50051
+    #   --cache-size 512
+    #   --enable-backups
+    #   --backup-dir /var/lib/veddb/backups
+    # --enable-encryption
+    #   --master-key ${VEDDB_MASTER_KEY}
+
+volumes:
+  veddb-data:
+    driver: local
+  veddb-backups:
+    driver: local
+  veddb-keys:
+    driver: local
+
+networks:
+  default:
+    name: veddb-network

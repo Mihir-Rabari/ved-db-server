@@ -15,6 +15,10 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 #[cfg(target_os = "linux")]
 use nix::unistd::ftruncate;
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsFd, OwnedFd};
 
 /// Shared memory segment that can be accessed by multiple processes
 pub struct SharedMemory {
@@ -43,12 +47,16 @@ impl SharedMemory {
     /// Create shared memory using memfd (Linux only)
     #[cfg(target_os = "linux")]
     fn create_memfd(name: &str, size: usize) -> Result<Self> {
-        let fd =
-            memfd_create(name, MemFdCreateFlag::MFD_CLOEXEC).context("Failed to create memfd")?;
+        // Convert &str to CString for nix API
+        let c_name = CString::new(name).context("Invalid name for memfd")?;
+        let fd = memfd_create(&c_name, MemFdCreateFlag::MFD_CLOEXEC)
+            .context("Failed to create memfd")?;
 
-        ftruncate(fd, size as i64).context("Failed to set memfd size")?;
+        // ftruncate now takes a reference to OwnedFd
+        ftruncate(fd.as_fd(), size as i64).context("Failed to set memfd size")?;
 
-        let file = unsafe { std::fs::File::from_raw_fd(fd) };
+        // Convert OwnedFd to File with explicit type
+        let file: std::fs::File = fd.into();
         let mmap = unsafe { MmapMut::map_mut(&file) }.context("Failed to mmap memfd")?;
 
         Ok(Self {

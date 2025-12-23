@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 #[cfg(target_os = "linux")]
 use nix::sys::eventfd::{eventfd, EfdFlags};
 #[cfg(target_os = "linux")]
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{RawFd, AsRawFd};
+#[cfg(target_os = "linux")]
+use std::os::fd::OwnedFd;
 
 /// Session identifier
 pub type SessionId = u64;
@@ -177,7 +179,12 @@ impl SessionRegistry {
             {
                 // Create eventfd for notifications
                 match eventfd(0, EfdFlags::EFD_CLOEXEC) {
-                    Ok(fd) => session.eventfd = fd,
+                    Ok(owned_fd) => {
+                        // Extract RawFd from OwnedFd and store it
+                        session.eventfd = owned_fd.as_raw_fd();
+                        // Keep the OwnedFd alive by forgetting it (we'll close manually later)
+                        std::mem::forget(owned_fd);
+                    }
                     Err(_) => session.eventfd = -1,
                 }
             }
@@ -420,7 +427,10 @@ impl SessionManager {
             #[cfg(target_os = "linux")]
             {
                 if session.eventfd != -1 {
-                    let _ = nix::sys::eventfd::eventfd_write(session.eventfd, 1);
+                    // Write to eventfd using nix::unistd::write
+                    use nix::unistd::write;
+                    let buf = 1u64.to_ne_bytes();
+                    let _ = write(session.eventfd, &buf);
                 }
             }
         }

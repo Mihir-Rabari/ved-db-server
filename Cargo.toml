@@ -2,9 +2,6 @@
 members = [
     "veddb-core",
     "veddb-server",
-    "veddb-admin",
-    "veddb-migrate",
-    "veddb-compass",
 ]
 resolver = "2"
 

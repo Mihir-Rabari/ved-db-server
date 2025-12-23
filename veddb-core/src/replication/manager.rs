@@ -108,7 +108,8 @@ impl ReplicationManager {
         *self.slave_manager.lock().await = Some(slave_manager);
 
         // Start listening for slave connections
-        let bind_addr = "0.0.0.0:50052".parse().unwrap(); // TODO: Make configurable
+        let bind_addr = self.config.bind_address;
+        info!("Replication listener binding to {}", bind_addr);
         let mut listener = ReplicationListener::bind(bind_addr).await?;
 
         let slave_manager = Arc::clone(&self.slave_manager);
@@ -282,9 +283,10 @@ impl ReplicationManager {
 
         // Send sync request
         let last_sequence = sync_manager.current_sequence();
+        let slave_id = format!("{}-{}", "slave", uuid::Uuid::new_v4());
         let sync_request = ReplicationMessage::SyncRequest {
             last_sequence,
-            slave_id: "slave-001".to_string(), // TODO: Generate unique slave ID
+            slave_id,
         };
 
         connection.send_message(&sync_request).await?;
@@ -483,7 +485,8 @@ impl ReplicationManager {
     /// Start master operations after promotion
     async fn start_master_operations(&self) -> ReplicationResult<()> {
         // Start listening for new slave connections
-        let bind_addr = "0.0.0.0:50052".parse().unwrap(); // TODO: Make configurable
+        let bind_addr = self.config.bind_address;
+        info!("Replication listener binding to {} after promotion", bind_addr);
         let mut listener = ReplicationListener::bind(bind_addr).await?;
 
         let slave_manager = Arc::clone(&self.slave_manager);

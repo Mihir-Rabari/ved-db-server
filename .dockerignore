@@ -1,0 +1,46 @@
+# Docker ignore file for VedDB Server
+# Optimized build context
+
+# Ignore target directories (build artifacts)
+target/
+**/target/
+
+# Ignore git
+.git/
+.gitignore
+
+# Ignore IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Ignore documentation
+*.md
+!README.md
+
+# Ignore logs
+*.log
+*.txt
+
+# Ignore docker files themselves
+.dockerignore
+docker-compose*.yml
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore data directories
+veddb_data/
+backups/
+keys/
+
+# Keep all workspace members for build
+# - veddb-core (REQUIRED)
+# - veddb-server (REQUIRED)
+# - veddb-admin (workspace member)
+# - veddb-compass (workspace member)
+# - veddb-migrate (workspace member)
