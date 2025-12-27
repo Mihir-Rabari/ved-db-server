@@ -295,6 +295,25 @@ impl SlaveConnectionManager {
             false
         }
     }
+
+    /// Force synchronization with all connected slaves
+    pub async fn force_sync(&self) -> usize {
+        // Create a sync message (using heartbeat as sync trigger for now)
+        let sync_message = ReplicationMessage::heartbeat(0);
+        
+        let mut synced_count = 0;
+        for slave in &self.connections {
+            if slave.sender.send(sync_message.clone()).is_ok() {
+                synced_count += 1;
+                debug!("Triggered sync for slave {}", slave.connection_id);
+            } else {
+                warn!("Failed to trigger sync for slave {}", slave.connection_id);
+            }
+        }
+        
+        info!("Triggered sync for {} out of {} slaves", synced_count, self.connections.len());
+        synced_count
+    }
 }
 
 /// Handle for a slave connection

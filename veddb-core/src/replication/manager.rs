@@ -25,7 +25,7 @@ pub struct ReplicationManager {
     /// Statistics
     stats: Arc<RwLock<ReplicationStats>>,
     /// Slave connection manager (for master nodes)
-    slave_manager: Arc<Mutex<Option<SlaveConnectionManager>>>,
+    pub(super) slave_manager: Arc<Mutex<Option<SlaveConnectionManager>>>,
     /// Master connection (for slave nodes)
     master_connection: Arc<Mutex<Option<ReplicationConnection>>>,
     /// Shutdown signal

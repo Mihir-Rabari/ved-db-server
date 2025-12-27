@@ -799,30 +799,35 @@ impl ConnectionManager {
             },
             
             OpCode::AddSlave => {
-                let _repl_mgr = self.replication_manager.as_ref()
+                let repl_mgr = self.replication_manager.as_ref()
                     .ok_or_else(|| ConnectionError::ProtocolError("Replication feature not enabled".to_string()))?;
                 
-                let _req: crate::protocol::AddSlaveRequest = serde_json::from_slice(&command.value)
+                let req: crate::protocol::AddSlaveRequest = serde_json::from_slice(&command.value)
                     .map_err(|e| ConnectionError::ProtocolError(format!("Invalid request: {}", e)))?;
                 
-                // TODO: Implement add_slave in ReplicationManager
-                // repl_mgr.add_slave(&req.slave_addr).await?;
+                // Implement add_slave in ReplicationManager
+                let slave_id = repl_mgr.add_slave(&req.slave_address).await
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Failed to add slave: {}", e)))?;
                 
-                let op_res = OperationResponse::success(None);
-                let payload = serde_json::to_vec(&op_res)
+                let result = serde_json::json!({
+                    "success": true,
+                    "slave_id": slave_id
+                });
+                let payload = serde_json::to_vec(&result)
                     .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 Ok(Response::ok(command.header.seq, payload))
             },
             
             OpCode::RemoveSlave => {
-                let _repl_mgr = self.replication_manager.as_ref()
+                let repl_mgr = self.replication_manager.as_ref()
                     .ok_or_else(|| ConnectionError::ProtocolError("Replication feature not enabled".to_string()))?;
                 
-                let _req: crate::protocol::RemoveSlaveRequest = serde_json::from_slice(&command.value)
+                let req: crate::protocol::RemoveSlaveRequest = serde_json::from_slice(&command.value)
                     .map_err(|e| ConnectionError::ProtocolError(format!("Invalid request: {}", e)))?;
                 
-                // TODO: Implement remove_slave in ReplicationManager
-                // repl_mgr.remove_slave(&req.slave_id).await?;
+                // Implement remove_slave in ReplicationManager
+                repl_mgr.remove_slave(&req.slave_id).await
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Failed to remove slave: {}", e)))?;
                 
                 let op_res = OperationResponse::success(None);
                 let payload = serde_json::to_vec(&op_res)
@@ -831,11 +836,22 @@ impl ConnectionManager {
             },
             
             OpCode::ListSlaves => {
-                let _repl_mgr = self.replication_manager.as_ref()
+                let repl_mgr = self.replication_manager.as_ref()
                     .ok_or_else(|| ConnectionError::ProtocolError("Replication feature not enabled".to_string()))?;
                 
-                // TODO: Get actual slave list from ReplicationManager
-                let slaves: Vec<crate::protocol::SlaveInfo> = vec![];
+                // Get actual slave list from ReplicationManager
+                let repl_slaves = repl_mgr.list_slaves().await;
+                
+                // Convert to protocol SlaveInfo format
+                let slaves: Vec<crate::protocol::SlaveInfo> = repl_slaves.iter().map(|s| {
+                    crate::protocol::SlaveInfo {
+                        slave_id: s.connection_id.clone(),
+                        address: s.peer_addr.to_string(),
+                        last_ack_sequence: 0, // Not tracked yet
+                        connected: s.connected,
+                        connected_at: None, // Not tracked yet
+                    }
+                }).collect();
                 
                 let payload = serde_json::to_vec(&slaves)
                     .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
@@ -843,14 +859,18 @@ impl ConnectionManager {
             },
             
             OpCode::ForceSync => {
-                let _repl_mgr = self.replication_manager.as_ref()
+                let repl_mgr = self.replication_manager.as_ref()
                     .ok_or_else(|| ConnectionError::ProtocolError("Replication feature not enabled".to_string()))?;
                 
-                // TODO: Implement force_sync in ReplicationManager
-                // repl_mgr.force_sync().await?;
+                // Implement force_sync in ReplicationManager
+                let synced_count = repl_mgr.force_sync().await
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Failed to force sync: {}", e)))?;
                 
-                let op_res = OperationResponse::success(None);
-                let payload = serde_json::to_vec(&op_res)
+                let result = serde_json::json!({
+                    "success": true,
+                    "synced_slaves": synced_count
+                });
+                let payload = serde_json::to_vec(&result)
                     .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 Ok(Response::ok(command.header.seq, payload))
             },

@@ -2,7 +2,7 @@
 
 use super::manager::ReplicationManager;
 use super::{ReplicationError, ReplicationResult};
-use crate::protocol::SlaveInfo;
+use crate::replication::connection::SlaveInfo;
 use std::net::SocketAddr;
 use tracing::info;
 
@@ -18,7 +18,8 @@ impl ReplicationManager {
 
         info!("Adding slave {} at {}", slave_id, addr);
 
-        // Simplified implementation - actual connection happens in start_master
+        // Note: Actual connection happens in start_master or when listener accepts connections
+        // This is a simplified implementation that just validates the address
         Ok(slave_id)
     }
 
@@ -26,22 +27,40 @@ impl ReplicationManager {
     pub async fn remove_slave(&self, slave_id: &str) -> ReplicationResult<()> {
         info!("Removing slave {}", slave_id);
         
-        // TODO: Implement when SlaveConnectionManager exposes remove method
-        Ok(())
+        let mut slave_manager = self.slave_manager.lock().await;
+        if let Some(manager) = slave_manager.as_mut() {
+            if manager.disconnect_slave(slave_id).await {
+                info!("Successfully removed slave {}", slave_id);
+                Ok(())
+            } else {
+                Err(ReplicationError::ConnectionError(format!("Slave not found: {}", slave_id)))
+            }
+        } else {
+            Err(ReplicationError::NotMaster)
+        }
     }
 
     /// List all connected slaves (master only)
     pub async fn list_slaves(&self) -> Vec<SlaveInfo> {
-        vec![]
-        // TODO: Expose public method on SlaveConnectionManager to list slaves
+        let slave_manager = self.slave_manager.lock().await;
+        if let Some(manager) = slave_manager.as_ref() {
+            manager.get_slave_info()
+        } else {
+            vec![]
+        }
     }
 
     /// Force synchronization with all slaves (master only)
-    pub async fn force_sync(&self) -> ReplicationResult<()> {
+    pub async fn force_sync(&self) -> ReplicationResult<usize> {
         info!("Forcing synchronization with all slaves");
         
-        // TODO: Implement by triggering sync through slave_manager
-        Ok(())
+        let slave_manager = self.slave_manager.lock().await;
+        if let Some(manager) = slave_manager.as_ref() {
+            let synced_count = manager.force_sync().await;
+            info!("Force sync sent to {} slaves", synced_count);
+            Ok(synced_count)
+        } else {
+            Err(ReplicationError::NotMaster)
+        }
     }
 }
-
