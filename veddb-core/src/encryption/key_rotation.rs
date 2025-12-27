@@ -125,7 +125,11 @@ impl KeyRotationScheduler {
     }
 
     /// Check for keys needing rotation and rotate them
-    pub async fn check_and_rotate_keys(&mut self, encryption_engine: &mut EncryptionEngine) -> Result<()> {
+    pub async fn check_and_rotate_keys(
+        &mut self,
+        encryption_engine: &mut EncryptionEngine,
+        storage: &dyn crate::encryption::EncryptedStorage,
+    ) -> Result<()> {
         let now = Utc::now();
         self.last_check = now;
 
@@ -168,7 +172,7 @@ impl KeyRotationScheduler {
             }
 
             // Start rotation for this key
-            match self.rotate_key(encryption_engine, &key_id).await {
+            match self.rotate_key(encryption_engine, storage, &key_id).await {
                 Ok(()) => {
                     log::info!("Successfully rotated key: {}", key_id);
                 }
