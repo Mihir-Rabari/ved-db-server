@@ -305,8 +305,13 @@ impl VedDb {
 
     fn handle_cas(&self, command: Command, seq: u32) -> Response {
         let kv_store = unsafe { &*self.kv_store };
-        // Note: v0.2.0 stores expected_version in payload instead of header
-        let expected_version = 0; // TODO: Parse from payload
+        
+        // Parse expected_version from command value (first 8 bytes as u64 little-endian)
+        let expected_version = if command.value.len() >= 8 {
+            u64::from_le_bytes(command.value[0..8].try_into().unwrap_or([0u8; 8]))
+        } else {
+            0 // Default to 0 if payload doesn't contain version
+        };
 
         match kv_store.cas(&command.key, expected_version, &command.value) {
             Ok(new_version) => {

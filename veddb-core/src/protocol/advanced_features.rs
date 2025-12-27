@@ -173,6 +173,10 @@ pub struct EncryptionKeyMetadata {
     pub is_active: bool,
 }
 
+/// Alias for backwards compatibility
+pub type KeyMetadataResponse = EncryptionKeyMetadata;
+
+
 // ===========================================================================
 // Aggregation Requests/Responses
 // ============================================================================

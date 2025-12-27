@@ -190,8 +190,13 @@ impl CompatibilityHandler {
     fn translate_cas_to_update_doc(&self, cmd: Command) -> Result<Command, String> {
         let key = String::from_utf8(cmd.key)
             .map_err(|_| "Invalid UTF-8 in key")?;
-        // Note: v0.2.0 stores expected_version in payload instead of header
-        let expected_version = 0; // TODO: Parse from payload
+        
+        // Parse expected_version from payload (first 8 bytes as u64 little-endian)
+        let expected_version = if cmd.value.len() >= 8 {
+            u64::from_le_bytes(cmd.value[0..8].try_into().unwrap_or([0u8; 8]))
+        } else {
+            0 // Default to 0 if payload doesn't contain version
+        };
 
         // Create filter to match key and version
         let mut filter = BTreeMap::new();

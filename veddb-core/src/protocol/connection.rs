@@ -731,10 +731,14 @@ impl ConnectionManager {
                     .ok_or_else(|| ConnectionError::ProtocolError("Backup feature not enabled".to_string()))?;
                 
                 let req: crate::protocol::DeleteBackupRequest = serde_json::from_slice(&command.value)
-                    .map_err(|e| ConnectionError::ProtocolError(format!("Invalid request: {}", e)))?;
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Invalid delete backup request: {}", e)))?;
                 
-                // Use the backup directory from BackupManager
-                let backup_dir = std::path::Path::new("./backups"); // TODO: Get from backup_mgr
+                // Get backup directory from BackupManager configuration
+                let backup_dir = self.backup_manager.as_ref()
+                    .and_then(|bm| bm.config().backup_dir.as_ref())
+                    .map(|p| p.as_path())
+                    .unwrap_or_else(|| std::path::Path::new("./backups"));
+                
                 let backup_path = backup_dir.join(&req.backup_id);
                 let meta_path = backup_path.with_extension("meta");
                 
