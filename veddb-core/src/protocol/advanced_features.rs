@@ -167,9 +167,13 @@ pub struct EncryptionKeyMetadata {
     pub algorithm: String,
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
+    /// Last rotation timestamp
+    pub last_rotated: DateTime<Utc>,
     /// Expiration timestamp
     pub expires_at: Option<DateTime<Utc>>,
     /// Whether active
+    pub active: bool,
+    /// Whether active (alias for backcompat)
     pub is_active: bool,
 }
 

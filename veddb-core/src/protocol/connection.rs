@@ -934,10 +934,13 @@ impl ConnectionManager {
                 let key_infos: Vec<crate::protocol::KeyMetadataResponse> = keys.iter().map(|key| {
                     crate::protocol::KeyMetadataResponse {
                         key_id: key.id.clone(),
+                        version: key.version,
+                        algorithm: "AES-256-GCM".to_string(), // Default algorithm
                         created_at: key.created_at,
                         last_rotated: key.last_rotated,
-                        version: key.version,
+                        expires_at: None, // No expiration by default
                         active: key.active,
+                        is_active: key.active, // Mirror active field
                     }
                 }).collect();
                 
@@ -1053,9 +1056,9 @@ impl ConnectionManager {
                 // Need write lock for rotation
                 let mut engine = enc_engine.write().await;
                 
-                // TODO P0.5: Pass storage reference here
-                // match engine.rotate_key(&self.storage, &req.key_id).await {
-                match engine.rotate_key(&req.key_id).await {
+                // Pass storage as &dyn EncryptedStorage to rotate_key
+                let storage_ref: &dyn crate::encryption::EncryptedStorage = &*self.storage;
+                match engine.rotate_key(storage_ref, &req.key_id).await {
                     Ok(_) => {
                         let op_res = OperationResponse::success(None);
                         let payload = serde_json::to_vec(&op_res)
@@ -1083,10 +1086,13 @@ impl ConnectionManager {
                     Ok(key) => {
                         let response = crate::protocol::KeyMetadataResponse {
                             key_id: key.id.clone(),
+                            version: key.version,
+                            algorithm: "AES-256-GCM".to_string(),
                             created_at: key.created_at,
                             last_rotated: key.last_rotated,
-                            version: key.version,
+                            expires_at: None,
                             active: key.active,
+                            is_active: key.active,
                         };
                         let payload = serde_json::to_vec(&response)
                             .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
