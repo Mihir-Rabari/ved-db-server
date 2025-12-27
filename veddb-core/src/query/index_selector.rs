@@ -110,7 +110,7 @@ impl IndexSelector {
     }
 
     /// Find indexes that can be used for a specific field
-    fn find_indexes_for_field(&self, field: &str, candidates: &mut Vec<IndexCandidate>) {
+    pub fn find_indexes_for_field(&self, field: &str, candidates: &mut Vec<IndexCandidate>) {
         for index in &self.available_indexes {
             if index.can_use_for_field(field) {
                 if !candidates.iter().any(|c| c.name == index.name) {
@@ -252,11 +252,11 @@ impl Default for IndexSelector {
     }
 }
 
-/// Index candidate for selection
+///Index candidate for selection
 #[derive(Debug, Clone)]
-struct IndexCandidate {
+pub struct IndexCandidate {
     /// Index name
-    name: String,
+    pub name: String,
     /// Index type
     index_type: IndexType,
     /// Whether the index is unique
