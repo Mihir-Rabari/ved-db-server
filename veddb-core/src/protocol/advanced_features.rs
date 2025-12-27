@@ -149,26 +149,50 @@ pub struct ImportKeyRequest {
     pub encrypted_data: String,
 }
 
-/// Request to get key metadata
+/// Request to view a specific key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetKeyMetadataRequest {
     /// Key ID
     pub key_id: String,
 }
 
-/// Key metadata response
+/// Response containing encryption key metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyMetadataResponse {
+pub struct EncryptionKeyMetadata {
     /// Key identifier
     pub key_id: String,
-    /// When key was created
-    pub created_at: DateTime<Utc>,
-    /// Last rotation time
-    pub last_rotated: DateTime<Utc>,
-    /// Key version number
+    /// Key version
     pub version: u32,
-    /// Whether key is active
-    pub active: bool,
+    /// Algorithm (AES-256-GCM, ChaCha20-Poly1305)
+    pub algorithm: String,
+    /// Creation timestamp
+    pub created_at: DateTime<Utc>,
+    /// Expiration timestamp
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Whether active
+    pub is_active: bool,
+}
+
+// ===========================================================================
+// Aggregation Requests/Responses
+// ============================================================================
+
+/// Request to execute aggregation pipeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregateRequest {
+    /// Collection name
+    pub collection: String,
+    /// Aggregation pipeline stages
+    pub pipeline: Vec<serde_json::Value>,
+}
+
+/// Response containing aggregation results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregateResponse {
+    /// Result documents
+    pub results: Vec<serde_json::Value>,
+    /// Count of results
+    pub count: usize,
 }
 
 /// Request to get keys approaching expiry

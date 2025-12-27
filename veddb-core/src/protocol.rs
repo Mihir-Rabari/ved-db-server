@@ -101,6 +101,9 @@ pub enum OpCode {
     DeleteUser = 0x3D,
     UpdateUserRole = 0x3E,
     
+    // Aggregation Pipeline
+    Aggregate = 0x3F,
+    
     // Backup & Recovery Operations (0x40-0x4F)
     CreateBackup = 0x40,
     ListBackups = 0x41,
