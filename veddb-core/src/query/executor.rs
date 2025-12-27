@@ -210,7 +210,7 @@ impl QueryExecutor {
     }
 
     /// Check if a document matches a filter
-    fn matches_filter(&self, doc: &Document, filter: &Filter) -> Result<bool, QueryExecutionError> {
+    pub fn matches_filter(&self, doc: &Document, filter: &Filter) -> Result<bool, QueryExecutionError> {
         match filter {
             Filter::Empty => Ok(true),
             

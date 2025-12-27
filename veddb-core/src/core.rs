@@ -328,30 +328,30 @@ impl VedDb {
     }
 
     fn handle_subscribe(&self, command: Command, seq: u32) -> Response {
-        // Extract subscriber_id from command (using seq as subscriber ID for now)
-        let subscriber_id = seq as u64;
+        // Generate unique subscriber ID using UUID to prevent collisions
+        let subscriber_id = uuid::Uuid::new_v4().as_u128() as u64;
         
         // Extract channel name from command.value
         let channel_name = String::from_utf8_lossy(&command.value).to_string();
         
-        // Subscribe to channel (create runtime for async operation)
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        match runtime.block_on(self.pubsub_system.subscribe(subscriber_id, &channel_name)) {
+        // Subscribe to channel using shared runtime handle
+        let handle = tokio::runtime::Handle::current();
+        match handle.block_on(self.pubsub_system.subscribe(subscriber_id, &channel_name)) {
             Ok(()) => Response::ok(seq, Vec::new()),
             Err(_) => Response::error(seq),
         }
     }
 
     fn handle_unsubscribe(&self, command: Command, seq: u32) -> Response {
-        // Extract subscriber_id from command (using seq as subscriber ID for now)
-        let subscriber_id = seq as u64;
+        // Generate unique subscriber ID using UUID to prevent collisions
+        let subscriber_id = uuid::Uuid::new_v4().as_u128() as u64;
         
         // Extract channel name from command.value
         let channel_name = String::from_utf8_lossy(&command.value).to_string();
         
-        // Unsubscribe from channel (create runtime for async operation)
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        match runtime.block_on(self.pubsub_system.unsubscribe(subscriber_id, &channel_name)) {
+        // Unsubscribe from channel using shared runtime handle
+        let handle = tokio::runtime::Handle::current();
+        match handle.block_on(self.pubsub_system.unsubscribe(subscriber_id, &channel_name)) {
             Ok(_) => Response::ok(seq, Vec::new()),
             Err(_) => Response::error(seq),
         }
@@ -362,9 +362,9 @@ impl VedDb {
         let channel_name = String::from_utf8_lossy(&command.key).to_string();
         let payload = command.value.clone();
         
-        // Publish message to channel (create runtime for async operation)
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        match runtime.block_on(self.pubsub_system.publish(&channel_name, payload)) {
+        // Publish message to channel using shared runtime handle
+        let handle = tokio::runtime::Handle::current();
+        match handle.block_on(self.pubsub_system.publish(&channel_name, payload)) {
             Ok(delivered_count) => {
                 // Return number of subscribers that received the message
                 let count_bytes = (delivered_count as u64).to_le_bytes().to_vec();

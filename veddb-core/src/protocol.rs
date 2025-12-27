@@ -214,6 +214,9 @@ impl TryFrom<u8> for OpCode {
             0x65 => Ok(OpCode::GetKeyMetadata),
             0x66 => Ok(OpCode::GetKeysExpiring),
             
+            // Aggregation Pipeline
+            0x3F => Ok(OpCode::Aggregate),
+            
             _ => Err(()),
         }
     }
@@ -800,6 +803,17 @@ pub enum HashOperation {
     Keys,
     Vals,
     Len,
+}
+
+// ============================================================================
+// Aggregation Pipeline Request
+// ============================================================================
+
+/// Aggregation pipeline request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregateRequest {
+    pub collection: String,
+    pub pipeline: Vec<crate::aggregation::PipelineStage>,
 }
 
 // ============================================================================

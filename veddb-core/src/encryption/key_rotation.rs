@@ -182,9 +182,14 @@ impl KeyRotationScheduler {
         Ok(())
     }
 
-    /// Rotate a specific key
-    pub async fn rotate_key(&mut self, encryption_engine: &mut EncryptionEngine, key_id: &str) -> Result<()> {
-        log::info!("Starting key rotation for: {}", key_id);
+    /// Rotate a specific key with real re-encryption
+    pub async fn rotate_key(
+        &mut self,
+        encryption_engine: &mut EncryptionEngine,
+        storage: &dyn crate::encryption::EncryptedStorage,
+        key_id: &str,
+    ) -> Result<()> {
+        log::info!("Starting key rotation with re-encryption for: {}", key_id);
 
         // Initialize rotation status
         let mut status = KeyRotationStatus {
@@ -199,29 +204,57 @@ impl KeyRotationScheduler {
 
         self.rotation_statuses.insert(key_id.to_string(), status.clone());
 
-        // Step 1: Rotate the key in the key manager
-        encryption_engine.key_manager_mut().rotate_key(key_id)?;
-
-        // Step 2: Re-encrypt data with the new key
-        // Note: In a real implementation, this would iterate through all data
-        // and re-encrypt it with the new key. For now, we'll simulate this.
-        status.total_records = self.estimate_records_for_key(key_id).await?;
+        // Step 1: Rotate the key and get old key for re-encryption
+        let (old_key, old_version) = encryption_engine
+            .key_manager_mut()
+            .rotate_key_with_backup(key_id)?;
         
-        let mut processed = 0;
+        let new_key = encryption_engine.key_manager().get_key(key_id)?;
+        let new_version = encryption_engine.key_manager().get_key_metadata(key_id)?.version;
+
+        // Create re-encryption context
+        let context = crate::encryption::ReEncryptionContext::new(
+            key_id.to_string(),
+            old_key,
+            old_version,
+            new_key,
+            new_version,
+        );
+
+        // Step 2: Scan storage for documents to re-encrypt
+        let collections = storage.list_encrypted_collections()?;
+        let mut all_documents = Vec::new();
+        
+        for collection in &collections {
+            // Only process collections that use this key
+            if self.is_collection_using_key(collection, key_id) {
+                let docs = storage.scan_encrypted_collection(collection)?;
+                all_documents.extend(docs);
+            }
+        }
+        
+        status.total_records = all_documents.len() as u64;
+        self.rotation_statuses.insert(key_id.to_string(), status.clone());
+        
+        log::info!("Found {} documents to re-encrypt for key {}", status.total_records, key_id);
+
+        // Step 3: Re-encrypt in batches
         let batch_size = self.config.reencryption_batch_size;
         let delay = TokioDuration::from_millis(self.config.reencryption_delay_ms);
+        let mut processed = 0;
 
-        while processed < status.total_records {
-            let batch_end = std::cmp::min(processed + batch_size as u64, status.total_records);
+        for chunk in all_documents.chunks(batch_size) {
+            // Re-encrypt this batch
+            let count = self.reencrypt_batch(encryption_engine, storage, &context, chunk).await?;
             
-            // Simulate re-encryption of a batch
-            self.reencrypt_batch(encryption_engine, key_id, processed, batch_end).await?;
-            
-            processed = batch_end;
+            processed += count as u64;
             status.records_processed = processed;
             
             // Update status
             self.rotation_statuses.insert(key_id.to_string(), status.clone());
+            
+            log::info!("Re-encrypted {}/{} documents for key {}", 
+                      processed, status.total_records, key_id);
             
             // Add delay between batches to avoid overwhelming the system
             if processed < status.total_records {
@@ -229,13 +262,26 @@ impl KeyRotationScheduler {
             }
         }
 
-        // Step 3: Mark rotation as completed
+        // Step 4: Mark rotation as completed
         status.status = RotationStatus::Completed;
         status.completed_at = Some(Utc::now());
         self.rotation_statuses.insert(key_id.to_string(), status);
 
-        log::info!("Completed key rotation for: {} ({} records processed)", key_id, processed);
+        log::info!("Completed key rotation for: {} ({} records re-encrypted)", key_id, processed);
         Ok(())
+    }
+    
+    /// Check if a collection uses a specific key
+    /// For now, we check if the collection name matches the key pattern
+    fn is_collection_using_key(&self, collection: &str, key_id: &str) -> bool {
+        // Key pattern: "collection_{name}" → matches collection "{name}"
+        if key_id.starts_with("collection_") {
+            let collection_part = &key_id["collection_".len()..];
+            collection == collection_part
+        } else {
+            // WAL, snapshot, and other keys don't match regular collections
+            false
+        }
     }
 
     /// Force rotation of a specific key (manual trigger)
@@ -289,26 +335,45 @@ impl KeyRotationScheduler {
         Ok(count)
     }
 
-    /// Re-encrypt a batch of records
+    /// Re-encrypt a batch of documents
     async fn reencrypt_batch(
         &self,
-        _encryption_engine: &mut EncryptionEngine,
-        key_id: &str,
-        start: u64,
-        end: u64,
-    ) -> Result<()> {
-        // In a real implementation, this would:
-        // 1. Read encrypted data with old key
-        // 2. Decrypt with old key
-        // 3. Encrypt with new key
-        // 4. Write back to storage
+        encryption_engine: &mut EncryptionEngine,
+        storage: &dyn crate::encryption::EncryptedStorage,
+        context: &crate::encryption::ReEncryptionContext,
+        documents: &[crate::encryption::EncryptedDocumentRef],
+    ) -> Result<usize> {
+        use crate::encryption::DocumentEncryption;
         
-        log::debug!("Re-encrypting batch for key {}: records {} to {}", key_id, start, end);
+        let doc_encryption = DocumentEncryption::new();
+        let mut reencrypted_count = 0;
         
-        // Simulate processing time
-        tokio::time::sleep(TokioDuration::from_millis(10)).await;
+        for doc_ref in documents {
+            // Decrypt with old key
+            let decrypted_data = match doc_encryption.decrypt(&doc_ref.encrypted_data, &context.old_key) {
+                Ok(data) => data,
+                Err(e) => {
+                    log::error!("Failed to decrypt document {} in collection {}: {}", 
+                               doc_ref.doc_id, doc_ref.collection, e);
+                    continue; // Skip this document, continue with others
+                }
+            };
+            
+            // Re-encrypt with new key
+            let new_encrypted_data = doc_encryption.encrypt(&decrypted_data, &context.new_key)?;
+            
+            // Atomically update the encrypted document
+            storage.update_encrypted_document(
+                &doc_ref.collection,
+                doc_ref.doc_id,
+                new_encrypted_data,
+            )?;
+            
+            reencrypted_count += 1;
+        }
         
-        Ok(())
+        log::debug!("Re-encrypted {} documents for key {}", reencrypted_count, context.key_id);
+        Ok(reencrypted_count)
     }
 
     /// Clean up old rotation statuses

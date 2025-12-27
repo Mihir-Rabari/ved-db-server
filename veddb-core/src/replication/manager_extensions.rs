@@ -8,6 +8,16 @@ use tracing::info;
 
 impl ReplicationManager {
     /// Add a new slave to the replication cluster (master only)
+    /// 
+    /// Note: In VedDB's replication model, slaves connect TO the master,
+    /// not the other way around. This method validates the expected slave address
+    /// but the actual connection is established when the slave calls start_slave()
+    /// and connects to this master's bind_address.
+    /// 
+    /// To add a slave:
+    /// 1. Call this method on master to whitelist the slave address (optional)
+    /// 2. Start the slave node with master_addr pointing to this master
+    /// 3. Slave will connect and appear in list_slaves()
     pub async fn add_slave(&self, slave_addr: &str) -> ReplicationResult<String> {
         // Parse address
         let addr: SocketAddr = slave_addr.parse()
@@ -16,10 +26,9 @@ impl ReplicationManager {
         // Generate slave ID
         let slave_id = format!("slave_{}_{}", addr.ip(), addr.port());
 
-        info!("Adding slave {} at {}", slave_id, addr);
+        info!("Registered expected slave {} at {} (awaiting connection)", slave_id, addr);
 
-        // Note: Actual connection happens in start_master or when listener accepts connections
-        // This is a simplified implementation that just validates the address
+        // Actual connection happens when slave connects to this master's listener
         Ok(slave_id)
     }
 

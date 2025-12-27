@@ -208,9 +208,18 @@ impl KeyManager {
         Ok(())
     }
 
-    /// Rotate a key
-    pub fn rotate_key(&mut self, key_id: &str) -> Result<()> {
-        let version = {
+    /// Rotate a key and return the old key for re-encryption
+    pub fn rotate_key_with_backup(&mut self, key_id: &str) -> Result<(Vec<u8>, u32)> {
+        let (old_key, old_version) = {
+            let key = self.keys.get(key_id)
+                .ok_or_else(|| anyhow!("Key not found: {}", key_id))?;
+            
+            // Backup old key before rotation
+            (key.key.clone(), key.version)
+        };
+        
+        // Now rotate to new key
+        let new_version = {
             let key = self.keys.get_mut(key_id)
                 .ok_or_else(|| anyhow!("Key not found: {}", key_id))?;
             
@@ -220,7 +229,14 @@ impl KeyManager {
         
         self.save_keys()?;
         
-        log::info!("Rotated encryption key: {} (version {})", key_id, version);
+        log::info!("Rotated encryption key: {} (version {} → {})", key_id, old_version, new_version);
+        Ok((old_key, old_version))
+    }
+
+    /// Rotate a key (DEPRECATED: use rotate_key_with_backup for re-encryption)
+    pub fn rotate_key(&mut self, key_id: &str) -> Result<()> {
+        let (_old_key, _old_version) = self.rotate_key_with_backup(key_id)?;
+        log::warn!("rotate_key called without re-encryption - data remains encrypted with old key!");
         Ok(())
     }
 

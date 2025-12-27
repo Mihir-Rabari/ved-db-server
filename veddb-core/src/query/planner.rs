@@ -57,9 +57,17 @@ impl QueryPlanner {
             Filter::Lt { field, .. } |
             Filter::Lte { field, .. } |
             Filter::In { field, .. } => {
-                // For now, assume we have an index on any field
-                // In task 4.3, this will check actual available indexes
-                Ok(Some(format!("idx_{}", field)))
+                // Check if an actual index exists for this field
+                // IndexSelector will verify index existence
+                let mut candidates = Vec::new();
+                self.index_selector.find_indexes_for_field(field, &mut candidates);
+                
+                if let Some(candidate) = candidates.first() {
+                    Ok(Some(candidate.name.clone()))
+                } else {
+                    // No index found - will use collection scan
+                    Ok(None)
+                }
             }
             
             // Range queries can use indexes
@@ -74,10 +82,16 @@ impl QueryPlanner {
                     }
                 }
                 
-                // Find the best field for index usage
+                // Find the best field for index usage by checking available indexes
                 for (field, field_filters) in field_filters {
                     if field_filters.len() >= 1 {
-                        return Ok(Some(format!("idx_{}", field)));
+                        // Check if an index exists for this field
+                        let mut candidates = Vec::new();
+                        self.index_selector.find_indexes_for_field(&field, &mut candidates);
+                        
+                        if let Some(candidate) = candidates.first() {
+                            return Ok(Some(candidate.name.clone()));
+                        }
                     }
                 }
                 

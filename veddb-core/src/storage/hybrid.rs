@@ -956,3 +956,37 @@ mod tests {
         assert!(stats.cache_hit_rate() >= 0.0 && stats.cache_hit_rate() <= 1.0);
     }
 }
+
+// Implement EncryptedStorage trait for key rotation re-encryption
+impl crate::encryption::EncryptedStorage for HybridStorageEngine {
+    fn scan_encrypted_collection(&self, collection: &str) -> anyhow::Result<Vec<crate::encryption::EncryptedDocumentRef>> {
+        let documents = self.scan_collection(collection)?;
+        let encrypted_refs: Vec<crate::encryption::EncryptedDocumentRef> = documents
+            .into_iter()
+            .map(|doc| {
+                let encrypted_data = serde_json::to_vec(&doc).unwrap_or_default();
+                crate::encryption::EncryptedDocumentRef {
+                    collection: collection.to_string(),
+                    doc_id: doc.id,
+                    encrypted_data,
+                }
+            })
+            .collect();
+        Ok(encrypted_refs)
+    }
+    
+   fn list_encrypted_collections(&self) -> anyhow::Result<Vec<String>> {
+        self.persistent_layer.list_collections()
+    }
+    
+    fn update_encrypted_document(&self, collection: &str, doc_id: crate::document::DocumentId, new_encrypted_data: Vec<u8>) -> anyhow::Result<()> {
+        let doc: crate::document::Document = serde_json::from_slice(&new_encrypted_data)?;
+        self.persistent_layer.update_document(collection, doc_id, &doc)?;
+        Ok(())
+    }
+    
+    fn is_collection_encrypted(&self, _collection: &str) -> bool {
+        true
+    }
+}
+

@@ -466,26 +466,46 @@ impl ConnectionManager {
                 Ok(Response::ok(command.header.seq, payload))
             },
             OpCode::DeleteDoc => {
-                let req: DeleteDocRequest = serde_json::from_slice(&command.value).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
-                // Simplified delete - assumes filter is just _id for now or implement filter logic later
-                // For this task, we will try to extract _id from filter
-                let doc_id = if let Some(id_val) = req.filter.as_object().and_then(|m| m.get("_id")).and_then(|v| v.as_str()) {
-                     match Uuid::parse_str(id_val) {
-                         Ok(uuid) => crate::document::DocumentId::from_uuid(uuid),
-                         Err(_) => return Ok(Response::new(Status::InvalidQuery, command.header.seq, b"Invalid ID format".to_vec())),
-                     }
-                } else {
-                    return Ok(Response::new(Status::InvalidQuery, command.header.seq, b"Delete currently only supports _id filter".to_vec()));
-                };
-
-                let deleted = self.storage.delete_document(&req.collection, doc_id).await.map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
-                let mut op_res = OperationResponse::success(None);
-                if deleted {
-                    op_res.affected_count = Some(1);
-                } else {
-                    op_res.affected_count = Some(0);
+                let req: DeleteDocRequest = serde_json::from_slice(&command.value)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                
+                // Parse filter using query parser for full filter support
+                use crate::query::parser::QueryParser;
+                use crate::query::executor::QueryExecutor;
+                
+                let filter = QueryParser::parse_filter(&req.filter)
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Invalid filter: {}", e)))?;
+                
+                // Scan collection to find matching documents
+                let documents = self.storage.scan_collection(&req.collection)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                
+                // Create query executor for filter matching
+                let executor = QueryExecutor::new();
+                
+                // Find all documents that match the filter
+                let mut deleted_count = 0;
+                for doc in documents {
+                    if executor.matches_filter(&doc, &filter)
+                        .map_err(|e| ConnectionError::ProtocolError(format!("Filter matching error: {}", e)))?
+                    {
+                        // Delete this document
+                        match self.storage.delete_document(&req.collection, doc.id).await {
+                            Ok(true) => deleted_count += 1,
+                            Ok(false) => {}, // Document already deleted  
+                            Err(e) => {
+                                // Log error but continue deleting other documents
+                                log::warn!("Failed to delete document {}: {}", doc.id, e);
+                            }
+                        }
+                    }
                 }
-                let payload = serde_json::to_vec(&op_res).unwrap();
+                
+                // Return operation response with accurate deletion count
+                let mut op_res = OperationResponse::success(None);
+                op_res.affected_count = Some(deleted_count);
+                let payload = serde_json::to_vec(&op_res)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 Ok(Response::ok(command.header.seq, payload))
             },
              OpCode::Query => {
@@ -1004,6 +1024,26 @@ impl ConnectionManager {
             },
             
             OpCode::RotateKey => {
+                // SECURITY: Key re-encryption engine implemented but integration pending.
+                // Server MUST refuse rotation requests until P0.5 integration is complete.
+                // 
+                // Cryptographic re-encryption logic is COMPLETE in:
+                // - encryption/key_manager.rs (rotate_key_with_backup)
+                // - encryption/key_rotation.rs (real batch re-encryption)
+                // - encryption/encrypted_storage.rs (EncryptedStorage trait)
+                //
+                // Remaining work: storage reference threading, state machine, startup enforcement.
+                // DO NOT REMOVE THIS GUARD until integration is verified and tested.
+                
+                return Err(ConnectionError::ProtocolError(
+                    "Key rotation is not yet fully integrated. \
+                     Cryptographic re-encryption engine is complete but system integration is pending. \
+                     This is a fail-closed security measure. \
+                     Contact system administrator for manual key rotation procedures.".to_string()
+                ));
+                
+                // The following code will be activated when P0.5 integration completes:
+                /*
                 let enc_engine = self.encryption_engine.as_ref()
                     .ok_or_else(|| ConnectionError::ProtocolError("Encryption feature not enabled".to_string()))?;
                 
@@ -1012,18 +1052,22 @@ impl ConnectionManager {
                 
                 // Need write lock for rotation
                 let mut engine = enc_engine.write().await;
+                
+                // TODO P0.5: Pass storage reference here
+                // match engine.rotate_key(&self.storage, &req.key_id).await {
                 match engine.rotate_key(&req.key_id).await {
                     Ok(_) => {
                         let op_res = OperationResponse::success(None);
                         let payload = serde_json::to_vec(&op_res)
                             .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                         Ok(Response::ok(command.header.seq, payload))
-                    },
+                    }
                     Err(e) => {
-                        let error_msg = format!("Rotate key failed: {}", e);
-                        Ok(Response::new(Status::Error, command.header.seq, error_msg.into_bytes()))
+                        let err_msg = format!("Key rotation failed: {}", e);
+                        Ok(Response::error(command.header.seq, err_msg))
                     }
                 }
+                */
             },
             
             OpCode::GetKeyMetadata => {
@@ -1055,7 +1099,51 @@ impl ConnectionManager {
                 }
             },
 
+            // ============================================================================
+            // Aggregation Pipeline
+            // ============================================================================
+            OpCode::Aggregate => {
+                let req: crate::protocol::AggregateRequest = serde_json::from_slice(&command.value)
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Invalid aggregation request: {}", e)))?;
+                
+                // Get collection documents as iterator for streaming execution
+                let collection_name = req.collection.clone();
+                
+                // Create pipeline executor
+                let pipeline = crate::aggregation::Pipeline::new(req.pipeline);
+                
+                // Get documents from storage
+                // Note: Current API returns Vec. In future, add true streaming iterator for better memory efficiency.
+                let documents = self.storage.scan_collection(&collection_name)
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Failed to scan collection: {}", e)))?;
+                
+                // Execute aggregation pipeline with streaming engine
+                match pipeline.execute(documents) {
+                    Ok(results) => {
+                        // Convert results to Value::Array
+                        use crate::document::Value;
+                        
+                        let result_values: Vec<Value> = results.into_iter().map(|doc| {
+                            // Convert Document to Value::Object
+                            Value::Object(doc)
+                        }).collect();
+                        
+                        let op_res = OperationResponse::success(Some(Value::Array(result_values)));
+                        let payload = serde_json::to_vec(&op_res)
+                            .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                        Ok(Response::ok(command.header.seq, payload))
+                    }
+                    Err(e) => {
+                        let op_res = OperationResponse::error(format!("Aggregation failed: {}", e));
+                        let payload = serde_json::to_vec(&op_res)
+                            .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                        Ok(Response::ok(command.header.seq, payload))
+                    }
+                }
+            },
+            
             _ => {
+
                 // For now, return not implemented for other commands
                 // These would be handled by the actual database engine
                 Ok(Response::new(Status::Error, command.header.seq, b"Not implemented".to_vec()))

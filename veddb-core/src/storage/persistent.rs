@@ -488,12 +488,50 @@ impl PersistentLayer {
         Ok(())
     }
 
-    // Helper to get collections list
+    // Helper to get collections list by scanning actual keys
     fn get_collections_list(&self) -> Result<Vec<String>> {
-        match self.get_metadata("collections")? {
-            Some(data) => serde_json::from_slice(&data).context("Failed to parse collections list"),
-            None => Ok(Vec::new()),
+        use std::collections::HashSet;
+        
+        let mut collections = HashSet::new();
+        
+        #[cfg(feature = "rocksdb-storage")]
+        {
+            // Scan all document keys to find collections
+            let cf = self.db.cf_handle("documents")
+                .context("Documents column family not found")?;
+            
+            let iter = self.db.iterator_cf(cf, rocksdb::IteratorMode::Start);
+            for item in iter {
+                let (key, _) = item?;
+                
+                // Parse collection name from key format "collection:docid"
+                if let Ok(key_str) = std::str::from_utf8(&key) {
+                    if let Some(colon_pos) = key_str.find(':') {
+                        let collection_name = &key_str[..colon_pos];
+                        collections.insert(collection_name.to_string());
+                    }
+                }
+            }
         }
+        
+        #[cfg(not(feature = "rocksdb-storage"))]
+        {
+            // Scan in-memory keys to find collections
+            let docs = self.documents.read();
+            for key in docs.keys() {
+                if let Ok(key_str) = std::str::from_utf8(key) {
+                    if let Some(colon_pos) = key_str.find(':') {
+                        let collection_name = &key_str[..colon_pos];
+                        collections.insert(collection_name.to_string());
+                    }
+                }
+            }
+        }
+        
+        // Convert HashSet to sorted Vec for consistent ordering
+        let mut result: Vec<String> = collections.into_iter().collect();
+        result.sort();
+        Ok(result)
     }
 
     // Helper to save collections list

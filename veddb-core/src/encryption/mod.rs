@@ -10,11 +10,13 @@ pub mod key_manager;
 pub mod document_encryption;
 pub mod key_rotation;
 pub mod tls;
+pub mod encrypted_storage;
 
 pub use key_manager::*;
 pub use document_encryption::*;
 pub use key_rotation::*;
 pub use tls::*;
+pub use encrypted_storage::*;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
