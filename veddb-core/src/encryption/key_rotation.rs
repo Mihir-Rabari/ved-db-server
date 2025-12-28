@@ -318,6 +318,179 @@ impl KeyRotationScheduler {
         log::info!("Completed key rotation for: {} ({} records re-encrypted)", key_id, processed);
         Ok(())
     }
+    /// Resume an incomplete rotation after crash
+/// 
+/// Called on startup to detect and resume ReEncrypting state.
+/// RULES:
+/// - Only resumes if state == ReEncrypting
+/// - Uses persisted checkpoint to skip already-processed docs
+/// - Reuses existing batch re-encryption logic
+/// - Maintains Completed→metadata invariant
+/// - NEVER auto-resumes Failed state
+pub async fn resume_rotation(
+    &mut self,
+    encryption_engine: &mut EncryptionEngine,
+    storage: &dyn crate::encryption::EncryptedStorage,
+) -> Result<()> {
+    // STEP 1: Detect incomplete rotation
+    let state = crate::encryption::load_rotation_state(&self.encryption_path)?;
+    
+    match state {
+        crate::encryption::KeyRotationState::ReEncrypting {
+            key_id,
+            started_at: _,
+            processed,
+            total,
+            last_checkpoint,
+        } => {
+            log::warn!(
+                "Detected incomplete rotation for key '{}'. Resuming from checkpoint...",
+                key_id
+            );
+            log::info!("Progress: {}/{} documents processed before crash", processed, total);
+            
+            // Resume the rotation from checkpoint
+            self.resume_from_checkpoint(
+                encryption_engine,
+                storage,
+                &key_id,
+                last_checkpoint,
+                processed,
+                total,
+            ).await?;
+            
+            Ok(())
+        }
+        crate::encryption::KeyRotationState::Failed { key_id, reason, .. } => {
+            // FAIL CLOSED: Do NOT auto-resume failed rotations
+            Err(anyhow!(
+                "FATAL: Previous rotation failed for key '{}': {}. \
+                 Manual intervention required. Do NOT auto-resume.",
+                key_id, reason
+            ))
+        }
+        crate::encryption::KeyRotationState::Idle => {
+            log::debug!("No incomplete rotation detected (state: Idle)");
+            Ok(())
+        }
+        crate::encryption::KeyRotationState::Completed { .. } => {
+            log::debug!("Last rotation completed successfully");
+            Ok(())
+        }
+    }
+}
+/// Resume rotation from last checkpoint
+/// 
+/// CRITICAL: Reuses existing re-encryption logic, no special cases
+async fn resume_from_checkpoint(
+    &mut self,
+    encryption_engine: &mut EncryptionEngine,
+    storage: &dyn crate::encryption::EncryptedStorage,
+    key_id: &str,
+    checkpoint: Option<(String, String)>, // (collection_name, document_id)
+    already_processed: u64,
+    total: u64, // NEVER recompute - use persisted total
+) -> Result<()> {
+    log::info!("Resuming rotation for key '{}' from checkpoint: {:?}", key_id, checkpoint);
+    
+    // Get key context (reuse same logic as rotate_key)
+    // Use rotate_key_with_backup to get old key (it was already rotated before crash)
+    let (old_key, old_version) = encryption_engine
+        .key_manager_mut()
+        .rotate_key_with_backup(key_id)?;
+    
+    let new_key = encryption_engine.key_manager().get_key(key_id)?;
+    let new_version = encryption_engine.key_manager().get_key_metadata(key_id)?.version;
+    
+    let context = crate::encryption::ReEncryptionContext::new(
+        key_id.to_string(),
+        old_key,
+        old_version,
+        new_key,
+        new_version,
+    );
+    
+    // Scan collections and skip documents before checkpoint
+    let collections = storage.list_encrypted_collections()?;
+    let mut remaining_documents = Vec::new();
+    let mut skip_mode = checkpoint.is_some();
+    let checkpoint_collection = checkpoint.as_ref().map(|(c, _)| c.as_str());
+    let checkpoint_doc_id = checkpoint.as_ref().map(|(_, d)| d.as_str());
+    
+    for collection in &collections {
+        // Only process collections using this key
+        if !self.is_collection_using_key(collection, key_id) {
+            continue;
+        }
+        
+        let docs = storage.scan_encrypted_collection(collection)?;
+        
+        for doc in docs {
+            // Skip documents before checkpoint
+            if skip_mode {
+                // Check if we've reached the checkpoint
+                if Some(doc.collection.as_str()) == checkpoint_collection 
+                    && Some(doc.doc_id.to_string().as_str()) == checkpoint_doc_id 
+                {
+                    skip_mode = false;
+                    // Include the checkpoint document (re-encrypt it again for safety)
+                } else {
+                    continue; // Skip this document
+                }
+            }
+            
+            remaining_documents.push(doc);
+        }
+    }
+    
+    log::info!("Resuming re-encryption of {} remaining documents", remaining_documents.len());
+    
+    // Re-encrypt remaining documents using existing batch logic (NO DUPLICATION)
+    let batch_size = self.config.reencryption_batch_size;
+    let delay = TokioDuration::from_millis(self.config.reencryption_delay_ms);
+    let mut processed = already_processed;
+    
+    for chunk in remaining_documents.chunks(batch_size) {
+        // REUSE existing batch re-encryption
+        let count = self.reencrypt_batch(encryption_engine, storage, &context, chunk).await?;
+        
+        processed += count as u64;
+        
+        // Update checkpoint after each batch
+        if let Some(last_doc) = chunk.last() {
+            let checkpoint_state = crate::encryption::KeyRotationState::ReEncrypting {
+                key_id: key_id.to_string(),
+                started_at: Utc::now(),
+                processed,
+                total, // Use persisted total, NEVER recompute
+                last_checkpoint: Some((last_doc.collection.clone(), last_doc.doc_id.to_string())),
+            };
+            crate::encryption::save_rotation_state(&self.encryption_path, &checkpoint_state)?;
+        }
+        
+        log::info!("Resume progress: {}/{} documents re-encrypted", processed, total);
+        
+        // Delay between batches
+        if processed < total {
+            tokio::time::sleep(delay).await;
+        }
+    }
+    
+    // CRITICAL INVARIANT: Same completion path as rotate_key()
+    // Persist Completed state BEFORE updating metadata
+    let completed_state = crate::encryption::KeyRotationState::Completed {
+        key_id: key_id.to_string(),
+        completed_at: Utc::now(),
+        documents_processed: processed,
+    };
+    crate::encryption::save_rotation_state(&self.encryption_path, &completed_state)?;
+    log::info!("State transition: ReEncrypting → Completed (resumed rotation)");
+    
+    // NOW safe to update key metadata (same as rotate_key)
+    log::info!("Rotation resumed and completed successfully: {} documents", processed);
+    
+    Ok(())
+}
     
     /// Check if a collection uses a specific key
     /// For now, we check if the collection name matches the key pattern
