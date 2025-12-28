@@ -203,7 +203,18 @@ impl KeyRotationScheduler {
     ) -> Result<()> {
         log::info!("Starting key rotation with re-encryption for: {}", key_id);
 
-        // Initialize rotation status
+        // STATE MACHINE: Check current state before starting
+        let current_state = crate::encryption::load_rotation_state(&self.encryption_path)?;
+        if !current_state.can_start_rotation() {
+            return Err(anyhow!(
+                "Cannot start rotation: current state is {:?}. \
+                 Only Idle or Completed states allow new rotations.",
+                current_state
+            ));
+        }
+        log::debug!("State check passed: {:?}", current_state);
+
+        // Initialize rotation status (legacy tracking)
         let mut status = KeyRotationStatus {
             key_id: key_id.to_string(),
             status: RotationStatus::InProgress,
