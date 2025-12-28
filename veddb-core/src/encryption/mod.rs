@@ -117,7 +117,7 @@ impl EncryptionEngine {
         let encryption_path = std::path::PathBuf::from("./encryption");
         let scheduler = KeyRotationScheduler::new(rotation_config, encryption_path);
         self.key_rotation_scheduler = Some(scheduler);
-        log::info!("Enabled automatic key rotation");
+        log::info!(" Key rotation scheduler: ENABLED (full re-encryption active)");
         Ok(())
     }
 
