@@ -128,20 +128,46 @@ impl EncryptionEngine {
     }
 
     /// Start key rotation scheduler (if enabled)
-    /// Note: This method is intended for background task spawning
-    pub fn has_key_rotation_enabled(&self) -> bool {
+    /// Note: This method    
+    /// Check if key rotation scheduler is enabled
+    pub fn is_rotation_enabled(&self) -> bool {
         self.key_rotation_scheduler.is_some()
     }
-
-    /// Manually rotate a specific key
-    pub async fn rotate_key(&mut self, key_id: &str) -> Result<()> {
-        // Always do direct rotation to avoid borrowing conflicts
-        // The scheduler can call this method when needed
-        self.key_manager.rotate_key(key_id)?;
-        log::info!("Manually rotated key: {}", key_id);
+    
+    /// Manually rotate a specific key with full re-encryption
+    /// 
+    /// If scheduler is enabled, this performs FULL re-encryption of all documents.
+    /// If scheduler is disabled, this performs key generation only (NO re-encryption).
+    pub async fn rotate_key(&mut self, key_id: &str, storage: &dyn crate::encryption::EncryptedStorage) -> Result<()> {
+        // SAFETY ASSERTION: Verify scheduler state matches expectation
+        debug_assert!(
+            self.key_rotation_scheduler.is_some(),
+            "MISCONFIGURATION: Key rotation called without scheduler. \
+             This will only generate new keys without re-encrypting data."
+        );
+        
+        if let Some(mut scheduler) = self.key_rotation_scheduler.take() {
+            // FULL ROTATION: Use scheduler for complete re-encryption
+            log::info!("🔄 Key rotation started for '{}': scheduler-driven re-encryption ENABLED", key_id);
+            let result = scheduler.rotate_key(self, storage, key_id).await;
+            self.key_rotation_scheduler = Some(scheduler);
+            result?;
+            log::info!("✅ Key rotation completed for '{}': all documents re-encrypted", key_id);
+        } else {
+            // FALLBACK: Key generation only (NO re-encryption)
+            log::warn!(
+                "⚠️  Key rotation for '{}' performed WITHOUT scheduler: \
+                 only generating new key, NO document re-encryption. \
+                 This is a partial rotation.", 
+                key_id
+            );
+            self.key_manager.rotate_key(key_id)?;
+            log::info!("Manually rotated key: {} (metadata only)", key_id);
+        }
+        
         Ok(())
     }
-
+    
     /// Perform scheduled key rotation check
     pub async fn check_and_rotate_keys(
         &mut self,

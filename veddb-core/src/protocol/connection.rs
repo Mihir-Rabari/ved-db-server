@@ -1052,9 +1052,10 @@ impl ConnectionManager {
                 // Need write lock for rotation
                 let mut engine = enc_engine.write().await;
                 
-                // Trigger key rotation
-                // Note: This does basic rotation. Full re-encryption requires scheduler integration.
-                match engine.rotate_key(&req.key_id).await {
+                // Trigger FULL key rotation with re-encryption
+                // Storage reference required for scheduler-driven document re-encryption
+                let storage_ref: &dyn crate::encryption::EncryptedStorage = &*self.storage;
+                match engine.rotate_key(&req.key_id, storage_ref).await {
                     Ok(_) => {
                         let op_res = OperationResponse::success(None);
                         let payload = serde_json::to_vec(&op_res)
