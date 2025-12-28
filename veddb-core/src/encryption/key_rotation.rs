@@ -87,15 +87,19 @@ pub struct KeyRotationScheduler {
     config: KeyRotationConfig,
     rotation_statuses: HashMap<String, KeyRotationStatus>,
     last_check: DateTime<Utc>,
+    /// Encryption metadata path for state persistence
+    /// CRITICAL: Must be encryption metadata dir, NOT generic storage path
+    encryption_path: std::path::PathBuf,
 }
 
 impl KeyRotationScheduler {
     /// Create a new key rotation scheduler
-    pub fn new(config: KeyRotationConfig) -> Self {
+    pub fn new(config: KeyRotationConfig, encryption_path: std::path::PathBuf) -> Self {
         Self {
             config,
             rotation_statuses: HashMap::new(),
             last_check: Utc::now(),
+            encryption_path,
         }
     }
 

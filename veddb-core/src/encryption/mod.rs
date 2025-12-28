@@ -9,12 +9,16 @@
 pub mod key_manager;
 pub mod document_encryption;
 pub mod key_rotation;
+pub mod rotation_state;
+pub mod rotation_state_store;
 pub mod tls;
 pub mod encrypted_storage;
 
 pub use key_manager::*;
 pub use document_encryption::*;
 pub use key_rotation::*;
+pub use rotation_state::*;
+pub use rotation_state_store::*;
 pub use tls::*;
 pub use encrypted_storage::*;
 
