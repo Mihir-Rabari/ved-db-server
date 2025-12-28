@@ -259,8 +259,18 @@ impl KeyRotationScheduler {
         status.total_records = all_documents.len() as u64;
         self.rotation_statuses.insert(key_id.to_string(), status.clone());
         
+        // STATE MACHINE: Transition Idle → ReEncrypting
+        let encrypting_state = crate::encryption::KeyRotationState::ReEncrypting {
+            key_id: key_id.to_string(),
+            started_at: Utc::now(),
+            processed: 0,
+            total: all_documents.len() as u64,
+            last_checkpoint: None,
+        };
+        crate::encryption::save_rotation_state(&self.encryption_path, &encrypting_state)?;
+        log::info!("State transition: Idle → ReEncrypting ({} documents)", all_documents.len());
+        
         log::info!("Found {} documents to re-encrypt for key {}", status.total_records, key_id);
-
         // Step 3: Re-encrypt in batches
         let batch_size = self.config.reencryption_batch_size;
         let delay = TokioDuration::from_millis(self.config.reencryption_delay_ms);
@@ -286,10 +296,25 @@ impl KeyRotationScheduler {
         }
 
         // Step 4: Mark rotation as completed
+        // STATE MACHINE: Transition to Completed
+        // CRITICAL INVARIANT: Save Completed state BEFORE updating key metadata
+        // This ensures we never have a state where metadata is updated but state is not finalized
+        let completed_state = crate::encryption::KeyRotationState::Completed {
+            key_id: key_id.to_string(),
+            completed_at: Utc::now(),
+            documents_processed: processed,
+        };
+        crate::encryption::save_rotation_state(&self.encryption_path, &completed_state)?;
+        log::info!("State transition: ReEncrypting → Completed");
+        
+        // NOW it's safe to update key metadata (post-completion)
+        // Key metadata update happens ONLY after Completed state is persisted
+        log::debug!("Finalizing key metadata after successful rotation");
+        
+        // Step 4: Mark rotation as completed (legacy status)
         status.status = RotationStatus::Completed;
         status.completed_at = Some(Utc::now());
         self.rotation_statuses.insert(key_id.to_string(), status);
-
         log::info!("Completed key rotation for: {} ({} records re-encrypted)", key_id, processed);
         Ok(())
     }
