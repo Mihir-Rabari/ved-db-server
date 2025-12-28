@@ -6,6 +6,8 @@
 //! - Document and WAL entry encryption/decryption
 //! - Key rotation support
 
+use anyhow::anyhow;
+
 pub mod key_manager;
 pub mod document_encryption;
 pub mod key_rotation;
@@ -91,15 +93,22 @@ impl EncryptionEngine {
         let key_manager = KeyManager::new(storage_path, config.master_key.as_deref())?;
         let document_encryption = DocumentEncryption::new();
         
-        Ok(Self {
-            config,
-            key_manager,
-            document_encryption,
-            key_rotation_scheduler: None,
-            tls_config: None,
-            tls_acceptor: None,
-        })
-    }
+        let engine = Self {
+        config,
+        key_manager,
+        document_encryption,
+        key_rotation_scheduler: None,
+        tls_config: None,
+        tls_acceptor: None,
+    };
+    
+    // CRITICAL: Enforce rotation state before allowing server startup
+    // This prevents starting with incomplete/failed rotation state
+    let encryption_path = std::path::Path::new(storage_path);
+    enforce_rotation_state_on_startup(encryption_path)?;
+    
+    Ok(engine)
+}
 
     /// Enable automatic key rotation
     pub fn enable_key_rotation(&mut self, rotation_config: KeyRotationConfig) -> Result<()> {
@@ -369,7 +378,61 @@ impl EncryptionEngine {
         &self.config
     }
 }
-
+/// Enforce rotation state on server startup
+/// 
+/// CRITICAL: Server MUST NOT start with incomplete or failed rotation state.
+/// This prevents undefined cryptographic state.
+/// 
+/// Rules:
+/// - Idle/Completed: OK (normal startup)
+/// - ReEncrypting: FATAL ERROR (incomplete rotation)
+/// - Failed: FATAL ERROR (manual intervention required)
+pub fn enforce_rotation_state_on_startup(
+    encryption_path: &std::path::Path
+) -> Result<()> {
+    let state = load_rotation_state(encryption_path)?;
+    
+    match state {
+        KeyRotationState::Idle => {
+            log::info!("Rotation state: Idle (no rotation in progress)");
+            Ok(())
+        }
+        KeyRotationState::Completed { key_id, completed_at, documents_processed } => {
+            log::info!(
+                "Rotation state: Completed (key '{}' rotated at {}, {} documents processed)",
+                key_id, completed_at, documents_processed
+            );
+            Ok(())
+        }
+        KeyRotationState::ReEncrypting { key_id, processed, total, .. } => {
+            Err(anyhow!(
+                "FATAL: Incomplete key rotation detected for key '{}'.\n\
+                 Progress: {}/{} documents re-encrypted.\n\
+                 Server CANNOT start with undefined cryptographic state.\n\n\
+                 Recovery options:\n\
+                 1. Automatic resume: The scheduler will auto-resume on next clean start\n\
+                 2. Manual intervention: Check logs and verify data integrity\n\n\
+                 DO NOT proceed until rotation is resolved.",
+                key_id, processed, total
+            ))
+        }
+        KeyRotationState::Failed { key_id, reason, failed_at } => {
+            Err(anyhow!(
+                "FATAL: Previous key rotation FAILED for key '{}'.\n\
+                 Failure time: {}\n\
+                 Reason: {}\n\n\
+                 MANUAL INTERVENTION REQUIRED.\n\
+                 Server CANNOT start until this is resolved.\n\n\
+                 Recovery steps:\n\
+                 1. Review logs for rotation failure details\n\
+                 2. Verify data integrity\n\
+                 3. Contact database administrator\n\
+                 4. Clear rotation state only after manual verification",
+                key_id, failed_at, reason
+            ))
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
