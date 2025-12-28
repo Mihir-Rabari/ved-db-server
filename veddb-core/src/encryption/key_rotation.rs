@@ -477,7 +477,9 @@ mod tests {
     #[test]
     fn test_key_rotation_scheduler_creation() {
         let config = create_test_rotation_config();
-        let scheduler = KeyRotationScheduler::new(config.clone());
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let scheduler = KeyRotationScheduler::new(config.clone(), encryption_path);
         
         assert_eq!(scheduler.config.rotation_interval_days, config.rotation_interval_days);
         assert_eq!(scheduler.rotation_statuses.len(), 0);
@@ -490,7 +492,9 @@ mod tests {
         let rotation_config = create_test_rotation_config();
         
         let mut engine = EncryptionEngine::new(encryption_config, temp_dir.path().to_str().unwrap()).unwrap();
-        let mut scheduler = KeyRotationScheduler::new(rotation_config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(rotation_config, encryption_path);
         
         // Create a key first
         engine.key_manager_mut().create_key("test_key").unwrap();
@@ -521,7 +525,9 @@ mod tests {
         let rotation_config = create_test_rotation_config();
         
         let mut engine = EncryptionEngine::new(encryption_config, temp_dir.path().to_str().unwrap()).unwrap();
-        let mut scheduler = KeyRotationScheduler::new(rotation_config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(rotation_config, encryption_path);
         
         // Create and rotate multiple keys
         for i in 0..3 {
@@ -539,7 +545,9 @@ mod tests {
     #[test]
     fn test_rotation_status_tracking() {
         let config = create_test_rotation_config();
-        let mut scheduler = KeyRotationScheduler::new(config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(config, encryption_path);
         
         // Test status tracking
         let status = KeyRotationStatus {
@@ -563,7 +571,9 @@ mod tests {
     #[test]
     fn test_rotation_cancellation() {
         let config = create_test_rotation_config();
-        let mut scheduler = KeyRotationScheduler::new(config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(config, encryption_path);
         
         // Add an in-progress rotation
         let status = KeyRotationStatus {
@@ -588,7 +598,9 @@ mod tests {
     #[test]
     fn test_cleanup_old_statuses() {
         let config = create_test_rotation_config();
-        let mut scheduler = KeyRotationScheduler::new(config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(config, encryption_path);
         
         // Add old completed rotation
         let old_status = KeyRotationStatus {
@@ -629,7 +641,9 @@ mod tests {
     #[test]
     fn test_rotation_config_update() {
         let config = create_test_rotation_config();
-        let mut scheduler = KeyRotationScheduler::new(config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let mut scheduler = KeyRotationScheduler::new(config, encryption_path);
         
         let mut new_config = create_test_rotation_config();
         new_config.rotation_interval_days = 180;
@@ -662,7 +676,9 @@ mod tests {
     #[tokio::test]
     async fn test_estimate_records_for_key() {
         let config = create_test_rotation_config();
-        let scheduler = KeyRotationScheduler::new(config);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let encryption_path = temp_dir.path().to_path_buf();
+        let scheduler = KeyRotationScheduler::new(config, encryption_path);
         
         // Test different key types
         let collection_count = scheduler.estimate_records_for_key("collection_test").await.unwrap();

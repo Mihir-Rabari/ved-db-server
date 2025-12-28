@@ -103,7 +103,10 @@ impl EncryptionEngine {
 
     /// Enable automatic key rotation
     pub fn enable_key_rotation(&mut self, rotation_config: KeyRotationConfig) -> Result<()> {
-        let scheduler = KeyRotationScheduler::new(rotation_config);
+        // Use encryption directory for rotation state storage
+        // CRITICAL: This must be bound to encryption metadata, not generic storage
+        let encryption_path = std::path::PathBuf::from("./encryption");
+        let scheduler = KeyRotationScheduler::new(rotation_config, encryption_path);
         self.key_rotation_scheduler = Some(scheduler);
         log::info!("Enabled automatic key rotation");
         Ok(())
