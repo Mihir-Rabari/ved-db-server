@@ -293,9 +293,14 @@ impl KeyRotationScheduler {
     }
 
     /// Force rotation of a specific key (manual trigger)
-    pub async fn force_rotate_key(&mut self, encryption_engine: &mut EncryptionEngine, key_id: &str) -> Result<()> {
+    pub async fn force_rotate_key(
+        &mut self,
+        encryption_engine: &mut EncryptionEngine,
+        storage: &dyn crate::encryption::EncryptedStorage,
+        key_id: &str,
+    ) -> Result<()> {
         log::info!("Force rotating key: {}", key_id);
-        self.rotate_key(encryption_engine, key_id).await
+        self.rotate_key(encryption_engine, storage, key_id).await
     }
 
     /// Cancel an in-progress key rotation

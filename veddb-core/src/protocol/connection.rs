@@ -473,7 +473,11 @@ impl ConnectionManager {
                 use crate::query::parser::QueryParser;
                 use crate::query::executor::QueryExecutor;
                 
-                let filter = QueryParser::parse_filter(&req.filter)
+                // Convert document::Value to serde_json::Value for parser
+                let filter_json = serde_json::to_value(&req.filter)
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Filter serialization error: {}", e)))?;
+                
+                let filter = QueryParser::parse_filter(&filter_json)
                     .map_err(|e| ConnectionError::ProtocolError(format!("Invalid filter: {}", e)))?;
                 
                 // Scan collection to find matching documents
@@ -755,8 +759,7 @@ impl ConnectionManager {
                 
                 // Get backup directory from BackupManager configuration
                 let backup_dir = self.backup_manager.as_ref()
-                    .and_then(|bm| bm.config().backup_dir.as_ref())
-                    .map(|p| p.as_path())
+                    .map(|bm| bm.config().backup_dir.as_path())
                     .unwrap_or_else(|| std::path::Path::new("./backups"));
                 
                 let backup_path = backup_dir.join(&req.backup_id);
