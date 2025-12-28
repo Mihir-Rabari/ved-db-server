@@ -127,10 +127,13 @@ impl EncryptionEngine {
     }
 
     /// Perform scheduled key rotation check
-    pub async fn check_and_rotate_keys(&mut self) -> Result<()> {
+    pub async fn check_and_rotate_keys(
+        &mut self,
+        storage: &dyn crate::encryption::EncryptedStorage,
+    ) -> Result<()> {
         if let Some(scheduler) = self.key_rotation_scheduler.take() {
             let mut temp_scheduler = scheduler;
-            temp_scheduler.check_and_rotate_keys(self).await?;
+            temp_scheduler.check_and_rotate_keys(self, storage).await?;
             self.key_rotation_scheduler = Some(temp_scheduler);
         }
         Ok(())

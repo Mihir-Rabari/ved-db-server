@@ -1130,8 +1130,8 @@ impl ConnectionManager {
                         use crate::document::Value;
                         
                         let result_values: Vec<Value> = results.into_iter().map(|doc| {
-                            // Convert Document to Value::Object
-                            Value::Object(doc)
+                            // Convert Document to Value::Object by accessing fields
+                            Value::Object(doc.fields)
                         }).collect();
                         
                         let op_res = OperationResponse::success(Some(Value::Array(result_values)));

@@ -100,7 +100,11 @@ impl KeyRotationScheduler {
     }
 
     /// Start the key rotation scheduler
-    pub async fn start(&mut self, encryption_engine: &mut EncryptionEngine) -> Result<()> {
+    pub async fn start(
+        &mut self,
+        encryption_engine: &mut EncryptionEngine,
+        storage: &dyn crate::encryption::EncryptedStorage,
+    ) -> Result<()> {
         if !self.config.enabled {
             log::info!("Key rotation scheduler is disabled");
             return Ok(());
@@ -110,7 +114,7 @@ impl KeyRotationScheduler {
                    self.config.rotation_interval_days);
 
         // Check for keys needing rotation immediately
-        self.check_and_rotate_keys(encryption_engine).await?;
+        self.check_and_rotate_keys(encryption_engine, storage).await?;
 
         // Schedule periodic checks (every 24 hours)
         let mut interval = interval(TokioDuration::from_secs(24 * 60 * 60));
@@ -118,7 +122,7 @@ impl KeyRotationScheduler {
         loop {
             interval.tick().await;
             
-            if let Err(e) = self.check_and_rotate_keys(encryption_engine).await {
+            if let Err(e) = self.check_and_rotate_keys(encryption_engine, storage).await {
                 log::error!("Key rotation check failed: {}", e);
             }
         }

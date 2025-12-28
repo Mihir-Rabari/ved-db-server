@@ -73,6 +73,11 @@ impl BackupManager {
         }
     }
 
+    /// Get backup configuration
+    pub fn config(&self) -> &BackupConfig {
+        &self.config
+    }
+
     /// Create a backup (Atomic with FIFO Retention)
     /// 
     /// Uses .tmp file markers during creation to prevent cleanup of incomplete backups.
