@@ -341,10 +341,18 @@ impl ConnectionManager {
                     .ok_or(ConnectionError::ConnectionNotFound)?
             };
 
-            // Read command
+            // Read command - this is the only place where we should exit on error
+            // (e.g., client disconnected, socket error)
             let command = {
                 let mut conn = connection_arc.write().await;
-                conn.read_command().await?
+                match conn.read_command().await {
+                    Ok(cmd) => cmd,
+                    Err(e) => {
+                        // Connection error during read means client disconnected
+                        debug!("Connection {} read error: {}", connection_id, e);
+                        return Err(e);
+                    }
+                }
             };
 
             // Update activity
@@ -353,14 +361,53 @@ impl ConnectionManager {
                 conn.update_activity();
             }
 
-            // Process command
-            let response = self.process_command(connection_id, command).await?;
+            // Process command - catch errors and send error response
+            // instead of breaking the connection
+            let response = match self.process_command(connection_id, command.clone()).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    // Log the error but don't close the connection
+                    warn!("Command processing error for connection {}: {}", connection_id, e);
+                    // Send error response to client
+                    Response::new(Status::Error, command.header.seq, format!("{}", e).into_bytes())
+                }
+            };
 
             // Write response
             {
                 let mut conn = connection_arc.write().await;
-                conn.write_response(response).await?;
+                if let Err(e) = conn.write_response(response).await {
+                    // Write error means client disconnected
+                    debug!("Connection {} write error: {}", connection_id, e);
+                    return Err(e);
+                }
             }
+        }
+    }
+
+    /// Convert document::Value to plain serde_json::Value (strips type tags)
+    /// This is needed because filters come in as Value enums but QueryParser expects flat JSON
+    fn value_to_plain_json(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Null => serde_json::Value::Null,
+            Value::Bool(b) => serde_json::Value::Bool(*b),
+            Value::Int32(i) => serde_json::Value::Number((*i).into()),
+            Value::Int64(i) => serde_json::Value::Number((*i).into()),
+            Value::Float64(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            Value::String(s) => serde_json::Value::String(s.clone()),
+            Value::Array(arr) => serde_json::Value::Array(
+                arr.iter().map(Self::value_to_plain_json).collect()
+            ),
+            Value::Object(obj) => serde_json::Value::Object(
+                obj.iter()
+                   .map(|(k, v)| (k.clone(), Self::value_to_plain_json(v)))
+                   .collect()
+            ),
+            Value::Binary(_) => serde_json::Value::Null,
+            Value::ObjectId(_) => serde_json::Value::Null,
+            Value::DateTime(_) => serde_json::Value::Null,
         }
     }
 
@@ -458,11 +505,106 @@ impl ConnectionManager {
             },
 
             // Document Operations
+            OpCode::Query => {
+                let req: crate::protocol::QueryRequest = serde_json::from_slice(&command.value)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+
+                // Convert filter Value to plain JSON for parser
+                let filter_json = match &req.filter {
+                    Some(f) => Self::value_to_plain_json(f),
+                    None => serde_json::Value::Object(serde_json::Map::new()),
+                };
+                
+                // Check if filter is empty object -> match all
+                let documents = if let serde_json::Value::Object(map) = &filter_json {
+                    if map.is_empty() {
+                         // Find all documents
+                         self.storage.scan_collection(&req.collection).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?
+                    } else {
+                         // Parse filter and find
+                         use crate::query::parser::QueryParser;
+                         use crate::query::executor::QueryExecutor;
+                         
+                         let filter = QueryParser::parse_filter(&filter_json)
+                             .map_err(|e| ConnectionError::ProtocolError(format!("Invalid filter: {}", e)))?;
+                             
+                         // Scan and filter
+                         let all_docs = self.storage.scan_collection(&req.collection).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                         let executor = QueryExecutor::new();
+                         
+                         let mut matched = Vec::new();
+                         for doc in all_docs {
+                             if executor.matches_filter(&doc, &filter).map_err(|e| ConnectionError::ProtocolError(e.to_string()))? {
+                                 matched.push(doc);
+                             }
+                         }
+                         matched
+                    }
+                } else {
+                    // Fallback for non-object filter (shouldn't happen for valid query)
+                    Vec::new()
+                };
+
+                let op_res = OperationResponse::success(Some(Value::Array(
+                    documents.into_iter().map(|mut d| {
+                        d.fields.insert("_id".to_string(), Value::String(d.id.to_string()));
+                        Value::Object(d.fields)
+                    }).collect()
+                )));
+                let payload = serde_json::to_vec(&op_res).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                Ok(Response::ok(command.header.seq, payload))
+            },
+
             OpCode::InsertDoc => {
                 let req: InsertDocRequest = serde_json::from_slice(&command.value).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 self.storage.insert_document(&req.collection, req.document).await.map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 let op_res = OperationResponse::success(None);
                 let payload = serde_json::to_vec(&op_res).map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                Ok(Response::ok(command.header.seq, payload))
+            },
+            OpCode::UpdateDoc => {
+                let req: UpdateDocRequest = serde_json::from_slice(&command.value)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                
+                use crate::query::parser::QueryParser;
+                use crate::query::executor::QueryExecutor;
+                use crate::document::{Document, DocumentId};
+                
+                // Convert filter Value to plain JSON for parser
+                let filter_json = Self::value_to_plain_json(&req.filter);
+                let filter = QueryParser::parse_filter(&filter_json)
+                    .map_err(|e| ConnectionError::ProtocolError(format!("Invalid filter: {}", e)))?;
+                
+                // Scan collection to find matching documents
+                let documents = self.storage.scan_collection(&req.collection)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
+                
+                let executor = QueryExecutor::new();
+                let mut updated_count = 0;
+                
+                for doc in documents {
+                    if executor.matches_filter(&doc, &filter)
+                        .map_err(|e| ConnectionError::ProtocolError(format!("Filter matching error: {}", e)))?
+                    {
+                        // Create updated document with same ID but new fields
+                        if let Value::Object(update_fields) = &req.update {
+                            let mut new_doc = Document::with_id(doc.id);
+                            new_doc.fields = update_fields.clone();
+                            
+                            match self.storage.update_document(&req.collection, doc.id, new_doc).await {
+                                Ok(()) => updated_count += 1,
+                                Err(e) => {
+                                    log::warn!("Failed to update document {}: {}", doc.id, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                let mut op_res = OperationResponse::success(None);
+                op_res.affected_count = Some(updated_count);
+                let payload = serde_json::to_vec(&op_res)
+                    .map_err(|e| ConnectionError::ProtocolError(e.to_string()))?;
                 Ok(Response::ok(command.header.seq, payload))
             },
             OpCode::DeleteDoc => {
@@ -473,9 +615,9 @@ impl ConnectionManager {
                 use crate::query::parser::QueryParser;
                 use crate::query::executor::QueryExecutor;
                 
-                // Convert document::Value to serde_json::Value for parser
-                let filter_json = serde_json::to_value(&req.filter)
-                    .map_err(|e| ConnectionError::ProtocolError(format!("Filter serialization error: {}", e)))?;
+                // Convert document::Value to plain serde_json::Value for parser
+                // This strips the tagged enum structure so QueryParser can understand it
+                let filter_json = Self::value_to_plain_json(&req.filter);
                 
                 let filter = QueryParser::parse_filter(&filter_json)
                     .map_err(|e| ConnectionError::ProtocolError(format!("Invalid filter: {}", e)))?;

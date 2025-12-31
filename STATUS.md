@@ -400,10 +400,21 @@ The code is FAR MORE complete than any previous docs claimed.
 **This is truth from code, not speculation.**
 
 ---
-**If this document feels radically different from earlier versions, that's because previous assessments were WRONG.**
 
 **The code was MORE complete than we thought.**
 
 Truth is cheaper than outages.
 
-**Final Update (Dec 28):** ALL P0 features code-verified as REAL. VedDB is 95% execution complete and production-viable for trusted environments.
+**Last Update (Dec 31):** LAUNCH READY (v0.2.1).
+- **Docker Image:** `mihirrabariii/veddb:0.2.1` / `latest` (Use this!)
+- **NPM Package:** `veddb-client` (v0.2.2) available.
+- **Native Binaries:** NOT SUPPORTED. We officially support Docker deployments only.
+
+## 11. Known Limitations & Future Work (Stubbed/Simulated)
+While all P0 features are code-verified and functional, the following areas contain simplified implementations or "stubs" to be addressed in future versions:
+- **Index Scans:** `QueryExecutor` currently falls back to collection scans for complex queries. Index structures exist (`btree`) but integration is basic.
+- **Distributed Consensus:** Replication uses a basic primary-backup model. Full Raft consensus is planned.
+- **Advanced Query Planning:** The planner is functional but simplistic; it does not yet perform cost-based optimization or complex join reordering.
+- **TLS/SSL:** Validated in code but requires external certificate management for production buffering.
+
+These items will be tracked as issues in the repository.
