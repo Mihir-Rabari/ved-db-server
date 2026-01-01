@@ -394,19 +394,17 @@ The code is FAR MORE complete than any previous docs claimed.
 **Not based on:**
 - Artifacts
 - Assumptions
-- TODO comments
+- comments
 - Earlier assessments
 
 **This is truth from code, not speculation.**
 
 ---
 
-**The code was MORE complete than we thought.**
+> Truth is cheaper than outages.
 
-Truth is cheaper than outages.
-
-**Last Update (Dec 31):** LAUNCH READY (v0.2.1).
-- **Docker Image:** `mihirrabariii/veddb:0.2.1` / `latest` (Use this!)
+**Last Update (Dec 31):** LAUNCH READY (v0.2.11).
+- **Docker Image:** `mihirrabariii/veddb:0.2.11` / `latest` (Use this!)
 - **NPM Package:** `veddb-client` (v0.2.2) available.
 - **Native Binaries:** NOT SUPPORTED. We officially support Docker deployments only.
 

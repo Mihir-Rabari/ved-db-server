@@ -1,4 +1,4 @@
-# VedDB Server v0.2.1
+# VedDB Server v0.2.11
 
 **Production-grade document database with verified real implementations**
 
